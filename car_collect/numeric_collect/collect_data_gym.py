@@ -240,7 +240,7 @@ if __name__ == "__main__":
     episodes = 10000
 
     # data_dir = os.path.join(CAR_FOUNDATION_DATA_DIR, f'{data_folder_prefix}-numeric_sim')
-    data_dir = os.path.join('/disk1/collect_data_from_anycar', f'{data_folder_prefix}-numeric_sim')
+    data_dir = os.path.join('/disk/collect_data_from_anycar', f'{data_folder_prefix}-numeric_sim')
 
     os.makedirs(data_dir, exist_ok=True)
     

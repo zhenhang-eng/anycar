@@ -18,11 +18,11 @@ from verify_utils import *
 
 Save_Fig = True
 
-model_path = "/disk1/collect_data_from_anycar/Compare_pytorch_and_jax/2025-01-23T11:12:12.318-model_checkpoint"
-# dataset_path = '/disk1/collect_data_from_anycar/check_data/from_data_params_8'  #10 pkl
-dataset_path = '/disk1/collect_data_from_anycar/Compare_pytorch_and_jax/temp_debug_data'  #10 pkl
-# dataset_path = "/disk1/collect_data_from_anycar/data_from_bag/data_use_steer_angle/pde-a1"
-# dataset_path = "/disk1/collect_data_from_anycar/data_from_bag/data_use_steer_angle/pdb-c11"
+model_path = "/disk/collect_data_from_anycar/Compare_pytorch_and_jax/2025-01-23T11:12:12.318-model_checkpoint"
+# dataset_path = '/disk/collect_data_from_anycar/check_data/from_data_params_8'  #10 pkl
+dataset_path = '/disk/collect_data_from_anycar/Compare_pytorch_and_jax/temp_debug_data'  #10 pkl
+# dataset_path = "/disk/collect_data_from_anycar/data_from_bag/data_use_steer_angle/pde-a1"
+# dataset_path = "/disk/collect_data_from_anycar/data_from_bag/data_use_steer_angle/pdb-c11"
 Long_Path_sim = False
 fig_result_path = '/home/gzh//anycar/model_test_result_fig'
 

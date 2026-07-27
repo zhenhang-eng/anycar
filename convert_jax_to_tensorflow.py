@@ -22,8 +22,8 @@ from jax.experimental import jax2tf
 
 Save_Fig = False
 
-model_path = "/disk1/collect_data_from_anycar/temp_verify_backlash_model/2025-01-14T18:44:21.817-model_checkpoint"
-dataset_path = '/disk1/collect_data_from_anycar/New_demo/check_data'
+model_path = "/disk/collect_data_from_anycar/temp_verify_backlash_model/2025-01-14T18:44:21.817-model_checkpoint"
+dataset_path = '/disk/collect_data_from_anycar/New_demo/check_data'
 fig_result_path = '/home/gzh//anycar/model_test_result_fig'
 
 model_checkpint = 200
@@ -86,5 +86,5 @@ input_signature = tf.TensorSpec(shape=(batch_size, history_length - 1 + predicti
 def tf_infer(x):
     return tf_model(x)
 
-tf.saved_model.save(tf_infer, '/disk1/collect_data_from_anycar/New_demo')
+tf.saved_model.save(tf_infer, '/disk/collect_data_from_anycar/New_demo')
 

@@ -7,11 +7,11 @@ import math
 
 from car_foundation.models import TorchTransformerDecoder, TorchGPT2
 
-model_path = "/disk1/collect_data_from_anycar/Compare_pytorch_and_jax/test_compress_file/torch_model_400_use_cnn_before_emb_fine_tune_c2"
-# model_path = "/disk1/collect_data_from_anycar/Compare_pytorch_and_jax/2025-02-10T10:20:21.689-model_checkpoint"
-# model_path = "/disk1/collect_data_from_anycar/Compare_pytorch_and_jax/2025-03-20T16:56:16.174-model_checkpoint"
-# model_path = "/disk1/collect_data_from_anycar/Compare_pytorch_and_jax/2025-03-20T19:50:30.419-model_checkpoint"
-output_path = "/disk1/collect_data_from_anycar/Compare_pytorch_and_jax/select_model/"
+model_path = "/disk/collect_data_from_anycar/Compare_pytorch_and_jax/test_compress_file/torch_model_400_use_cnn_before_emb_fine_tune_c2"
+# model_path = "/disk/collect_data_from_anycar/Compare_pytorch_and_jax/2025-02-10T10:20:21.689-model_checkpoint"
+# model_path = "/disk/collect_data_from_anycar/Compare_pytorch_and_jax/2025-03-20T16:56:16.174-model_checkpoint"
+# model_path = "/disk/collect_data_from_anycar/Compare_pytorch_and_jax/2025-03-20T19:50:30.419-model_checkpoint"
+output_path = "/disk/collect_data_from_anycar/Compare_pytorch_and_jax/select_model/"
 
 # state_dim = 6
 # action_dim = 2

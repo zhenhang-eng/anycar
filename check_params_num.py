@@ -12,15 +12,15 @@ from verify_utils import *
 Save_Fig = True
 
 onnx_model_path = "/home/gzh/Desktop/torch_transformer_decoder_fix_batch_size_512_0311_sanitize.onnx"
-# dataset_path =  '/disk1/collect_data_from_anycar/New_demo/check_data_with_offset' 
-dataset_path =  '/disk1/collect_data_from_anycar/Compare_pytorch_and_jax/temp_debug_data'  #10 pkl
-# dataset_path = '/disk1/collect_data_from_anycar/check_data/verify_bag_data_0310'
+# dataset_path =  '/disk/collect_data_from_anycar/New_demo/check_data_with_offset'
+dataset_path =  '/disk/collect_data_from_anycar/Compare_pytorch_and_jax/temp_debug_data'  #10 pkl
+# dataset_path = '/disk/collect_data_from_anycar/check_data/verify_bag_data_0310'
 
 
 # *************************Load checkpoint for mean and std******************
-# model_path = "/disk1/collect_data_from_anycar/Compare_pytorch_and_jax/2025-02-10T10:20:21.689-model_checkpoint"
-# model_path = "/disk1/collect_data_from_anycar/Compare_pytorch_and_jax/2025-01-24T14:18:55.571-model_checkpoint"
-model_path = "/disk1/collect_data_from_anycar/Compare_pytorch_and_jax/2025-03-11T19:25:14.129-model_checkpoint"
+# model_path = "/disk/collect_data_from_anycar/Compare_pytorch_and_jax/2025-02-10T10:20:21.689-model_checkpoint"
+# model_path = "/disk/collect_data_from_anycar/Compare_pytorch_and_jax/2025-01-24T14:18:55.571-model_checkpoint"
+model_path = "/disk/collect_data_from_anycar/Compare_pytorch_and_jax/2025-03-11T19:25:14.129-model_checkpoint"
 
 
 fig_result_path = '/home/gzh/anycar/model_test_result_fig'
@@ -60,5 +60,4 @@ for tensor in model.graph.initializer:
     total_params += param_count
 
 print(f"总参数量: {total_params} (≈ {total_params / 1e6:.2f}M)")
-
 

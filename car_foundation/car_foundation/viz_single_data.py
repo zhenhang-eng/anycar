@@ -11,7 +11,7 @@ from car_foundation.utils import quaternion_to_euler, generate_subsequences, gen
 import glob
 
 
-DATASET_NAME = "/disk1/collect_data_from_anycar/2024-11-12T14:49:38.560-nuplan-dynamic-model/"
+DATASET_NAME = "/disk/collect_data_from_anycar/2024-11-12T14:49:38.560-nuplan-dynamic-model/"
 
 path = os.path.join(CAR_FOUNDATION_DATA_DIR, DATASET_NAME)
 filenumber = 0

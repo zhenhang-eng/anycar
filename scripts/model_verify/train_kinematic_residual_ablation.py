@@ -66,7 +66,7 @@ def parse_args():
     )
     parser.add_argument(
         "--dataset-path",
-        default="/disk1/collect_data_from_anycar/New_demo/new_data_with_x_mean_zero/total_data_1",
+        default="/disk/collect_data_from_anycar/New_demo/new_data_with_x_mean_zero/total_data_1",
     )
     parser.add_argument("--max-files", type=int, default=0, help="0 uses all pkl files.")
     parser.add_argument("--train-ratio", type=float, default=0.8)

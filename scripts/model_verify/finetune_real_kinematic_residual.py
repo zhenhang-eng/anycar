@@ -78,7 +78,7 @@ def parse_args():
     )
     parser.add_argument(
         "--dataset-path",
-        default="/disk1/collect_data_from_anycar/data_from_bag/new_temp_data/pkg_file",
+        default="/disk/collect_data_from_anycar/data_from_bag/new_temp_data/pkg_file",
     )
     parser.add_argument(
         "--residual-checkpoint",

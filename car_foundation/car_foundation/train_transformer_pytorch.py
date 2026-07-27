@@ -94,7 +94,7 @@ if FINE_TUNE:
     warmup_period = env_int("ANYCAR_WARMUP_PERIOD", 2)
     num_epochs = env_int("ANYCAR_NUM_EPOCHS", 400)
     load_checkpoint = True
-    resume_model_path = env_str("ANYCAR_RESUME_MODEL_PATH", "/disk1/collect_data_from_anycar/Compare_pytorch_and_jax/test_compress_file/torch_model_400_use_cnn_before_emb")
+    resume_model_path = env_str("ANYCAR_RESUME_MODEL_PATH", "/disk/collect_data_from_anycar/Compare_pytorch_and_jax/test_compress_file/torch_model_400_use_cnn_before_emb")
 else:
     lr_begin = env_float("ANYCAR_LR_BEGIN", 5e-4)
     warmup_period = env_int("ANYCAR_WARMUP_PERIOD", 500)
@@ -104,13 +104,13 @@ else:
 val_every = env_int("ANYCAR_VAL_EVERY", 20)
 batch_size = env_int("ANYCAR_BATCH_SIZE", 512)
 lambda_l2 = env_float("ANYCAR_LAMBDA_L2", 1e-4)
-dataset_path = env_str("ANYCAR_DATASET_PATH", '/disk1/collect_data_from_anycar/data_from_bag/new_temp_data/c2_bag_04')
+dataset_path = env_str("ANYCAR_DATASET_PATH", '/disk/collect_data_from_anycar/data_from_bag/new_temp_data/c2_bag_04')
 
-# dataset_path = '/disk1/collect_data_from_anycar/New_demo/new_data_with_x_mean_zero/total_data_1'
-# dataset_path = '/disk1/collect_data_from_anycar/Compare_pytorch_and_jax/temp_debug_data'
-# dataset_path = '/disk1/collect_data_from_anycar/Compare_pytorch_and_jax/2025-01-14T16:39:46.443-nuplan-dynamic-model-base'
-# check_data_path = '/disk1/collect_data_from_anycar/temp_verify_backlash_model/2025-01-14T18:15:29.673-nuplan-dynamic-model-verify'
-check_data_path = env_str("ANYCAR_CHECK_DATA_PATH", '/disk1/collect_data_from_anycar/New_demo/check_data_with_offset')
+# dataset_path = '/disk/collect_data_from_anycar/New_demo/new_data_with_x_mean_zero/total_data_1'
+# dataset_path = '/disk/collect_data_from_anycar/Compare_pytorch_and_jax/temp_debug_data'
+# dataset_path = '/disk/collect_data_from_anycar/Compare_pytorch_and_jax/2025-01-14T16:39:46.443-nuplan-dynamic-model-base'
+# check_data_path = '/disk/collect_data_from_anycar/temp_verify_backlash_model/2025-01-14T18:15:29.673-nuplan-dynamic-model-verify'
+check_data_path = env_str("ANYCAR_CHECK_DATA_PATH", '/disk/collect_data_from_anycar/New_demo/check_data_with_offset')
 comment = env_str("ANYCAR_COMMENT", 'torch')
 
 # Device to use

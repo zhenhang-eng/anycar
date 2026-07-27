@@ -18,13 +18,13 @@ import torch.optim as optim
 
 Save_Fig = True
 
-model_path = "/disk1/collect_data_from_anycar/Compare_pytorch_and_jax/test_compress_file/torch_model_400_use_cnn_before_emb_fine_tune_c2_more_data"
-# model_path = "/disk1/collect_data_from_anycar/Compare_pytorch_and_jax/2025-03-11T19:25:14.129-model_checkpoint"
-# model_path = "/disk1/collect_data_from_anycar/Compare_pytorch_and_jax/2025-03-20T19:50:30.419-model_checkpoint"
-# dataset_path = '/disk1/collect_data_from_anycar/Compare_pytorch_and_jax/temp_debug_data'  #10 pkl
-# dataset_path = '/disk1/collect_data_from_anycar/data_from_bag/new_temp_data/pkg_file'  #10 pkl
-dataset_path = '/disk1/collect_data_from_anycar/select_bag_for_verify_sample/data_files'
-# dataset_path = '/disk1/collect_data_from_anycar/data_from_bag/new_temp_data/bug_pkl'
+model_path = "/disk/collect_data_from_anycar/Compare_pytorch_and_jax/test_compress_file/torch_model_400_use_cnn_before_emb_fine_tune_c2_more_data"
+# model_path = "/disk/collect_data_from_anycar/Compare_pytorch_and_jax/2025-03-11T19:25:14.129-model_checkpoint"
+# model_path = "/disk/collect_data_from_anycar/Compare_pytorch_and_jax/2025-03-20T19:50:30.419-model_checkpoint"
+# dataset_path = '/disk/collect_data_from_anycar/Compare_pytorch_and_jax/temp_debug_data'  #10 pkl
+# dataset_path = '/disk/collect_data_from_anycar/data_from_bag/new_temp_data/pkg_file'  #10 pkl
+dataset_path = '/disk/collect_data_from_anycar/select_bag_for_verify_sample/data_files'
+# dataset_path = '/disk/collect_data_from_anycar/data_from_bag/new_temp_data/bug_pkl'
 
 
 fig_result_path = '/home/gzh/anycar/model_test_result_fig'

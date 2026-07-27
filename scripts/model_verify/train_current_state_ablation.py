@@ -35,7 +35,7 @@ from car_foundation.models import LearnedPositionalEncoding
 
 
 DEFAULT_DATASET_PATH = (
-    "/disk1/collect_data_from_anycar/New_demo/new_data_with_x_mean_zero/total_data_1"
+    "/disk/collect_data_from_anycar/New_demo/new_data_with_x_mean_zero/total_data_1"
 )
 STATE_WEIGHTS = torch.tensor([0.5, 0.5, 2.0, 0.5, 0.0, 2.5], dtype=torch.float32)
 STATE_NAMES = ("x", "y", "yaw", "vx", "vy", "yawrate")

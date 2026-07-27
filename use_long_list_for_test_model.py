@@ -133,7 +133,7 @@ for rate in tire_steering_rate:
     car_state_list.append(copy.deepcopy(vehicle_state))
 
 Save_Data = True
-data_dir = os.path.join('/disk1/collect_data_from_anycar/', f'{data_folder_prefix}-long-list-dynamic-model')
+data_dir = os.path.join('/disk/collect_data_from_anycar/', f'{data_folder_prefix}-long-list-dynamic-model')
 os.makedirs(data_dir, exist_ok=True)
 if Save_Data:
     dataset_list = []

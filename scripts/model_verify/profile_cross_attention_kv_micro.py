@@ -25,7 +25,7 @@ DEFAULT_CHECKPOINT = (
     "/home/gzh/anycar/outputs/checkpoints/"
     "2026-07-01T11:09:19.608-model_checkpoint/400"
 )
-DEFAULT_DATA_DIR = "/disk1/collect_data_from_anycar/New_demo/check_data_with_offset"
+DEFAULT_DATA_DIR = "/disk/collect_data_from_anycar/New_demo/check_data_with_offset"
 
 
 def parse_args():
