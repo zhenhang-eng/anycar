@@ -1,0 +1,69 @@
+digraph AnyCarTraining {
+  graph [
+    rankdir=LR,
+    bgcolor="white",
+    pad="0.25",
+    nodesep="0.34",
+    ranksep="0.62",
+    fontname="Noto Sans CJK SC",
+    fontsize=12,
+    label="当前模型的三阶段训练流程",
+    labelloc=t
+  ];
+  node [
+    shape=box,
+    style="rounded,filled",
+    color="#475569",
+    fillcolor="#F8FAFC",
+    fontname="Noto Sans CJK SC",
+    fontsize=10,
+    margin="0.10,0.07"
+  ];
+  edge [color="#64748B", arrowsize=0.75, fontname="Noto Sans CJK SC", fontsize=9];
+
+  subgraph cluster_sim {
+    label="阶段 A：仿真预训练";
+    color="#60A5FA";
+    style="rounded";
+    sim_data [label="仿真 20,000 files\n16k train / 3k val / 1k test", fillcolor="#EFF6FF"];
+    sim_stats [label="仅用 train 统计量\n归一化 history/context/residual/nominal"];
+    sim_train [label="Query 模型从头训练\n30 epochs, batch 256\nAdamW, lr=5e-4, decay=0.99"];
+    sim_loss [label="L_sim = 加权归一化残差 MSE\nweights=[0.5,0.5,0.5,2.5]\nrollout loss weight=0"];
+    sim_select [label="每 5 epoch 验证\n按多 horizon rollout score 选模\nbest epoch=30", fillcolor="#DBEAFE"];
+    sim_ckpt [label="query_best.pt\n仿真预训练权重", fillcolor="#DBEAFE"];
+    sim_data -> sim_stats -> sim_train;
+    sim_loss -> sim_train;
+    sim_train -> sim_select -> sim_ckpt;
+  }
+
+  subgraph cluster_real {
+    label="阶段 B：实车全参数微调";
+    color="#34D399";
+    style="rounded";
+    real_data [label="固定 minute-group 隔离拆分\n33,855 train / 15,505 val / 5,456 test\n过滤异常 quaternion / position jump", fillcolor="#F0FDF4"];
+    retarget [label="用 real train 残差统计量\n等价变换输出 head\n物理预测保持不变"];
+    real_train [label="加载仿真 checkpoint\n均值模型全部参数微调\n30 epochs, batch 256\nAdamW, lr=5e-5, decay=0.99"];
+    real_loss [label="L_real = L_transition + 0.01 L_rollout\nrollout horizons=[1,5,10,20,50]"];
+    real_select [label="每 2 epoch 验证\n按 validation rollout score 选模\nbest epoch=28", fillcolor="#DCFCE7"];
+    mean_ckpt [label="实车 query_best.pt\n最终均值模型", fillcolor="#DCFCE7"];
+    sim_ckpt -> retarget;
+    real_data -> retarget -> real_train;
+    real_loss -> real_train;
+    real_train -> real_select -> mean_ckpt;
+  }
+
+  subgraph cluster_prob {
+    label="阶段 C：概率头（可选）";
+    color="#A78BFA";
+    style="rounded";
+    freeze [label="冻结整个均值模型\n复用 decoder hidden", fillcolor="#F5F3FF"];
+    val_split [label="只拆 real validation\n7,737 sigma-train\n3,885 sigma-val\n3,883 calibration\ntest 保持未见"];
+    sigma_train [label="只训练 Linear(256→4)\n1,028 参数\nGaussian NLL, 100 epochs\nAdamW, lr=1e-3"];
+    calibrate [label="horizon × channel\n温度校准"];
+    prob_ckpt [label="sigma head best epoch=98\n均值预测完全不变", fillcolor="#EDE9FE"];
+    mean_ckpt -> freeze;
+    real_data -> val_split;
+    freeze -> sigma_train;
+    val_split -> sigma_train -> calibrate -> prob_ckpt;
+  }
+}

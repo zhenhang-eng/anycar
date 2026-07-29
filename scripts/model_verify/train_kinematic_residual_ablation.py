@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
-"""Train and compare physically consistent direct and residual predictors.
+"""Train deterministic physically consistent Query residual predictors.
 
 This experiment intentionally uses the observable five-state protocol
 ``[x, y, yaw, vx, yawrate]``.  nuPlan ``vy`` remains available for offline
 analysis but is neither an input nor a supervised output here.
 Yaw is integrated from the current yawrate under the nuPlan v2 protocol and is
 not predicted as an independent transition channel.
+
+The default ``query`` variant predicts only the four-channel residual mean.  It
+does not construct or train a probability, sigma, or risk head.  The ``direct``
+and ``residual`` variants remain available through ``--models`` for explicit
+ablation runs.
 """
 
 import argparse
@@ -62,7 +67,10 @@ PROTOCOL_VERSION = "consistent_v2"
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Compare nuPlan direct and kinematic-residual prediction."
+        description=(
+            "Train the deterministic kinematic-residual Query model; optional "
+            "direct/residual variants are retained for explicit ablations."
+        )
     )
     parser.add_argument(
         "--dataset-path",
@@ -84,7 +92,14 @@ def parse_args():
         default=1,
         help="Use steer[t + shift] for transition t->t+1; nuPlan generator uses 1.",
     )
-    parser.add_argument("--models", default="direct,residual")
+    parser.add_argument(
+        "--models",
+        default="query",
+        help=(
+            "Comma-separated deterministic variants. Default: query. "
+            "Allowed: direct,residual,query."
+        ),
+    )
     parser.add_argument("--include-kinematic", action="store_true")
     parser.add_argument(
         "--epochs",
@@ -160,7 +175,9 @@ def parse_args():
     parser.add_argument("--device", choices=("cuda",), default="cuda")
     parser.add_argument(
         "--output-dir",
-        default=os.path.join(REPO_ROOT, "outputs", "kinematic_residual_ablation"),
+        default=os.path.join(
+            REPO_ROOT, "outputs", "query_kinematic_residual_deterministic"
+        ),
     )
     return parser.parse_args()
 
@@ -744,6 +761,17 @@ def main():
         ).to(device)
 
     requested = [item.strip() for item in args.models.split(",") if item.strip()]
+    if not requested:
+        raise ValueError("--models must select at least one deterministic variant")
+    if len(requested) != len(set(requested)):
+        raise ValueError("--models must not contain duplicate variants")
+    unknown = sorted(set(requested) - {"direct", "residual", "query"})
+    if unknown:
+        raise ValueError(f"Unknown model variants: {unknown}")
+    print(
+        "deterministic output enabled: residual mean only; "
+        "probability/sigma head is not constructed"
+    )
     if "query" in requested:
         nominal_state_mean, nominal_state_std = streaming_stats(
             train_view, "nominal_state_rel", args.eval_batch_size
@@ -776,8 +804,6 @@ def main():
             "kinematic", None, test_loader, stats, params, device, args.max_eval_episodes
         )
     for variant in requested:
-        if variant not in ("direct", "residual", "query"):
-            raise ValueError(f"Unknown model variant: {variant}")
         set_seed(args.seed)
         model = make_model(args, device, variant)
         optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
@@ -958,6 +984,11 @@ def main():
 
     summary = {
         "protocol": PROTOCOL_VERSION,
+        "output_contract": {
+            "mode": "deterministic_residual_mean_only",
+            "channels": ["dx_body", "dy_body", "dvx", "dyawrate"],
+            "probability_output_enabled": False,
+        },
         "args": vars(args),
         "params": params_dict(params),
         "rollout": {

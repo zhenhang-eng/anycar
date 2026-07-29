@@ -1,0 +1,104 @@
+digraph AnyCarKinematicQuery {
+  graph [
+    rankdir=LR,
+    bgcolor="white",
+    pad="0.25",
+    nodesep="0.32",
+    ranksep="0.55",
+    fontname="Noto Sans CJK SC",
+    fontsize=12,
+    label="AnyCar 当前 Query 运动学残差模型",
+    labelloc=t
+  ];
+  node [
+    shape=box,
+    style="rounded,filled",
+    color="#475569",
+    fillcolor="#F8FAFC",
+    fontname="Noto Sans CJK SC",
+    fontsize=10,
+    margin="0.10,0.07"
+  ];
+  edge [color="#64748B", arrowsize=0.75, fontname="Noto Sans CJK SC", fontsize=9];
+
+  subgraph cluster_inputs {
+    label="输入（dt=0.05 s）";
+    color="#CBD5E1";
+    style="rounded,dashed";
+    history [label="历史 B×250×7\n状态 [x,y,yaw,vx,yawrate]\n+ 历史控制 [throttle,steer]", fillcolor="#EFF6FF"];
+    future_action [label="未来控制 B×50×2\n[throttle, steer]", fillcolor="#EFF6FF"];
+    current [label="当前上下文 B×4\n[vx, yawrate, throttle, steer]", fillcolor="#EFF6FF"];
+    initial [label="当前绝对状态 B×5", fillcolor="#EFF6FF"];
+  }
+
+  subgraph cluster_memory {
+    label="历史 Memory";
+    color="#93C5FD";
+    style="rounded";
+    split [label="状态 / 控制分支"];
+    conv [label="两层 Conv1d 时间压缩\n250 → 42"];
+    embed_hist [label="分别 Linear → 256\n交错并去尾 → 83 tokens"];
+    hist_pos [label="反向可学习位置编码\nMemory: B×83×256", fillcolor="#DBEAFE"];
+    history -> split -> conv -> embed_hist -> hist_pos;
+  }
+
+  subgraph cluster_nominal {
+    label="固定运动学先验（无可训练参数）";
+    color="#86EFAC";
+    style="rounded";
+    bicycle [label="运动学自行车 rollout\nL=3.9 m, ratio=25\noffset=5°, steer shift=1", fillcolor="#F0FDF4"];
+    nominal_state [label="名义相对状态 B×50×5\n[x,y,yaw,vx,yawrate]"];
+    nominal_transition [label="名义转移 B×50×4\n[dx_body,dy_body,dvx,dyawrate]"];
+    initial -> bicycle;
+    future_action -> bicycle;
+    bicycle -> nominal_state;
+    bicycle -> nominal_transition;
+  }
+
+  subgraph cluster_query {
+    label="未来 Query 构造";
+    color="#C4B5FD";
+    style="rounded";
+    action_embed [label="动作 Linear\n2 → 256"];
+    context_mlp [label="上下文残差 MLP\n[action(2), context(4)]\n6 → 128 → 256\n末层零初始化"];
+    kine_mlp [label="运动学 Query MLP\n[action(2), context(4),\nnominal state(5), transition(4)]\n15 → 128 → 256\n末层零初始化"];
+    query_sum [shape=circle, label="+", width=0.35, fillcolor="#EDE9FE"];
+    future_pos [label="正向可学习位置编码\nQuery: B×50×256", fillcolor="#EDE9FE"];
+    future_action -> action_embed -> query_sum;
+    future_action -> context_mlp;
+    current -> context_mlp -> query_sum;
+    future_action -> kine_mlp;
+    current -> kine_mlp;
+    nominal_state -> kine_mlp;
+    nominal_transition -> kine_mlp;
+    kine_mlp -> query_sum;
+    query_sum -> future_pos;
+  }
+
+  decoder [
+    label="3 层 Transformer Decoder\nd_model=256, heads=4, FFN=512\n因果 self-attention + history cross-attention",
+    fillcolor="#FEF3C7",
+    color="#D97706"
+  ];
+  hidden [label="Decoder hidden\nB×50×256", fillcolor="#FEF3C7"];
+  hist_pos -> decoder [label="memory"];
+  future_pos -> decoder [label="tgt"];
+  decoder -> hidden;
+
+  mean_head [label="均值 Linear head\n256 → 4", fillcolor="#FCE7F3", color="#DB2777"];
+  residual [label="反归一化残差 r_hat\n[dx_body,dy_body,dvx,dyawrate]", fillcolor="#FCE7F3"];
+  add_nominal [shape=circle, label="+", width=0.35, fillcolor="#DCFCE7"];
+  transition [label="预测物理转移\nΔ_hat = Δ_kin + r_hat", fillcolor="#DCFCE7"];
+  rollout [label="一致性状态积分\n输出未来 50 帧轨迹/状态", fillcolor="#DCFCE7", color="#16A34A"];
+  hidden -> mean_head -> residual -> add_nominal;
+  nominal_transition -> add_nominal;
+  add_nominal -> transition -> rollout;
+
+  sigma_head [
+    label="可选：冻结均值后训练\nLinear sigma head 256 → 4\nσ=1e-3+softplus(.)\n+ horizon×channel 温度校准",
+    fillcolor="#F1F5F9",
+    color="#64748B",
+    style="rounded,filled,dashed"
+  ];
+  hidden -> sigma_head [style=dashed, label="detach"];
+}

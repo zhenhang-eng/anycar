@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-"""Fine-tune Residual-v2 and Query Residual on grouped real-car data.
+"""Fine-tune deterministic Query Residual on grouped real-car data.
 
 The real files are split by acquisition-minute groups before any window is
-constructed.  This prevents adjacent pkl fragments from being assigned to
-different splits.  Both branches start from their frozen nuPlan checkpoints
-and use the same real train/validation/test split and optimization protocol.
+constructed. This prevents adjacent pkl fragments from being assigned to
+different splits. The default Query branch starts from its simulation
+checkpoint and predicts only the residual mean; no probability head is
+constructed. The plain residual branch remains available through ``--models``
+for an explicit comparison run.
 """
 
 import argparse
@@ -74,24 +76,44 @@ MINUTE_GROUP_PATTERN = re.compile(
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Fine-tune Residual-v2 and Query Residual on real-car data."
+        description=(
+            "Fine-tune the deterministic kinematic-residual Query model on "
+            "real-car data."
+        )
     )
     parser.add_argument(
         "--dataset-path",
         default="/disk/collect_data_from_anycar/data_from_bag/new_temp_data/pkg_file",
     )
     parser.add_argument(
+        "--split-manifest-dir",
+        default="",
+        help=(
+            "Optional directory containing train_files.txt, val_files.txt, and "
+            "test_files.txt. When set, reuse those exact session-isolated files "
+            "instead of constructing a new random minute-group split."
+        ),
+    )
+    parser.add_argument(
         "--residual-checkpoint",
         default=os.path.join(
             REPO_ROOT,
-            "outputs/formal_residual_vs_query_20k/20260716T142015/residual_best.pt",
+            "outputs/formal_kinematic_residual_query_30epoch/20260728T114849/residual_best.pt",
         ),
     )
     parser.add_argument(
         "--query-checkpoint",
         default=os.path.join(
             REPO_ROOT,
-            "outputs/formal_residual_vs_query_20k/20260716T142015/query_best.pt",
+            "outputs/formal_kinematic_residual_query_30epoch/20260728T114849/query_best.pt",
+        ),
+    )
+    parser.add_argument(
+        "--models",
+        default="query",
+        help=(
+            "Comma-separated deterministic variants. Default: query. "
+            "Allowed: residual,query."
         ),
     )
     parser.add_argument("--train-ratio", type=float, default=0.2)
@@ -139,7 +161,7 @@ def parse_args():
     parser.add_argument(
         "--output-dir",
         default=os.path.join(
-            REPO_ROOT, "outputs/formal_real_finetune_residual_vs_query"
+            REPO_ROOT, "outputs/real_finetune_query_deterministic"
         ),
     )
     return parser.parse_args()
@@ -228,6 +250,52 @@ def split_minute_groups(groups, group_dates, train_ratio, val_ratio, seed, max_g
     return split_groups, split_files
 
 
+def load_split_manifests(manifest_dir):
+    """Load and audit an existing file split without changing its ordering."""
+    manifest_dir = Path(manifest_dir).resolve()
+    split_files = {}
+    split_groups = {}
+    for split in ("train", "val", "test"):
+        manifest = manifest_dir / f"{split}_files.txt"
+        if not manifest.is_file():
+            raise FileNotFoundError(f"Missing split manifest: {manifest}")
+        files = [
+            str(Path(line.strip()).resolve())
+            for line in manifest.read_text().splitlines()
+            if line.strip()
+        ]
+        if not files:
+            raise ValueError(f"Empty split manifest: {manifest}")
+        if len(files) != len(set(files)):
+            raise ValueError(f"Duplicate files in split manifest: {manifest}")
+        missing = [path for path in files if not Path(path).is_file()]
+        if missing:
+            raise FileNotFoundError(
+                f"{manifest} references {len(missing)} missing files; "
+                f"first missing file: {missing[0]}"
+            )
+        split_files[split] = files
+        split_groups[split] = sorted(
+            {acquisition_minute(path)[1] for path in files}
+        )
+
+    for index, left in enumerate(("train", "val", "test")):
+        for right in ("train", "val", "test")[index + 1 :]:
+            file_overlap = set(split_files[left]) & set(split_files[right])
+            group_overlap = set(split_groups[left]) & set(split_groups[right])
+            if file_overlap:
+                raise ValueError(
+                    f"{left}/{right} manifests overlap by "
+                    f"{len(file_overlap)} files"
+                )
+            if group_overlap:
+                raise ValueError(
+                    f"{left}/{right} manifests overlap by "
+                    f"{len(group_overlap)} acquisition-minute groups"
+                )
+    return split_groups, split_files
+
+
 def build_filtered_view(files, args, params, split):
     sequence_length = (
         args.history_length + 1 + args.prediction_length
@@ -297,23 +365,32 @@ def validate_checkpoints(checkpoints, args):
         ):
             raise ValueError(f"{variant} checkpoint dt differs from --dt")
 
-    reference = checkpoints["residual"]
-    candidate = checkpoints["query"]
-    for key in ("history", "context", "residual", "direct"):
-        for index in (0, 1):
-            if not torch.equal(
-                reference["stats"][key][index],
-                candidate["stats"][key][index],
+    checkpoint_items = list(checkpoints.items())
+    if len(checkpoint_items) < 2:
+        return
+    reference_name, reference = checkpoint_items[0]
+    for candidate_name, candidate in checkpoint_items[1:]:
+        for key in ("history", "context", "residual", "direct"):
+            for index in (0, 1):
+                if not torch.equal(
+                    reference["stats"][key][index],
+                    candidate["stats"][key][index],
+                ):
+                    raise ValueError(
+                        f"{reference_name}/{candidate_name} checkpoints differ "
+                        f"in shared {key} stats"
+                    )
+        for key in ("dt", "wheelbase", "steering_ratio", "steering_offset"):
+            if not math.isclose(
+                float(reference["params"][key]),
+                float(candidate["params"][key]),
+                rel_tol=0.0,
+                abs_tol=1e-9,
             ):
-                raise ValueError(f"Pretrained checkpoints differ in shared {key} stats")
-    for key in ("dt", "wheelbase", "steering_ratio", "steering_offset"):
-        if not math.isclose(
-            float(reference["params"][key]),
-            float(candidate["params"][key]),
-            rel_tol=0.0,
-            abs_tol=1e-9,
-        ):
-            raise ValueError(f"Pretrained checkpoints differ in parameter {key}")
+                raise ValueError(
+                    f"{reference_name}/{candidate_name} checkpoints differ "
+                    f"in parameter {key}"
+                )
 
 
 def make_finetune_stats(checkpoint, real_residual, real_direct, device):
@@ -528,21 +605,39 @@ def main():
     if args.rollout_loss_weight < 0.0:
         raise ValueError("--rollout-loss-weight must be non-negative")
 
+    variants = [item.strip() for item in args.models.split(",") if item.strip()]
+    if not variants:
+        raise ValueError("--models must select at least one deterministic variant")
+    if len(variants) != len(set(variants)):
+        raise ValueError("--models must not contain duplicate variants")
+    unknown = sorted(set(variants) - {"residual", "query"})
+    if unknown:
+        raise ValueError(f"Unknown model variants: {unknown}")
+    print(
+        "deterministic output enabled: residual mean only; "
+        "probability/sigma head is not constructed"
+    )
+
     device = torch.device(args.device)
-    checkpoint_paths = {
+    all_checkpoint_paths = {
         "residual": Path(args.residual_checkpoint),
         "query": Path(args.query_checkpoint),
+    }
+    checkpoint_paths = {
+        variant: all_checkpoint_paths[variant] for variant in variants
     }
     checkpoints = {
         variant: torch.load(path, map_location=device, weights_only=False)
         for variant, path in checkpoint_paths.items()
     }
-    args.history_length = int(checkpoints["residual"]["args"]["history_length"])
+    reference_variant = variants[0]
+    reference_checkpoint = checkpoints[reference_variant]
+    args.history_length = int(reference_checkpoint["args"]["history_length"])
     args.prediction_length = int(
-        checkpoints["residual"]["args"]["prediction_length"]
+        reference_checkpoint["args"]["prediction_length"]
     )
     validate_checkpoints(checkpoints, args)
-    params = checkpoint_params(checkpoints["residual"], args.dt)
+    params = checkpoint_params(reference_checkpoint, args.dt)
     rollout_horizons = parse_rollout_horizons(
         args.rollout_horizons, args.prediction_length
     )
@@ -555,15 +650,26 @@ def main():
     output_dir = Path(args.output_dir) / timestamp
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    groups, group_dates = discover_minute_groups(args.dataset_path)
-    split_groups, split_files = split_minute_groups(
-        groups,
-        group_dates,
-        args.train_ratio,
-        args.val_ratio,
-        args.seed,
-        args.max_groups,
-    )
+    if args.split_manifest_dir:
+        if args.max_groups > 0:
+            raise ValueError(
+                "--max-groups cannot be combined with --split-manifest-dir"
+            )
+        split_groups, split_files = load_split_manifests(
+            args.split_manifest_dir
+        )
+        split_source = str(Path(args.split_manifest_dir).resolve())
+    else:
+        groups, group_dates = discover_minute_groups(args.dataset_path)
+        split_groups, split_files = split_minute_groups(
+            groups,
+            group_dates,
+            args.train_ratio,
+            args.val_ratio,
+            args.seed,
+            args.max_groups,
+        )
+        split_source = "generated_from_dataset"
     for split in ("train", "val", "test"):
         (output_dir / f"{split}_groups.txt").write_text(
             "\n".join(split_groups[split]) + "\n"
@@ -606,7 +712,7 @@ def main():
     audit_batch = next(iter(val_loader))
 
     training_results = {}
-    for variant in ("residual", "query"):
+    for variant in variants:
         set_seed(args.seed)
         source = checkpoints[variant]
         model_args = SimpleNamespace(**source["args"])
@@ -838,7 +944,7 @@ def main():
         torch.cuda.empty_cache()
 
     test_results = {}
-    for variant in ("residual", "query"):
+    for variant in variants:
         source = checkpoints[variant]
         model_args = SimpleNamespace(**source["args"])
         model_args.device = args.device
@@ -887,23 +993,25 @@ def main():
         torch.cuda.empty_cache()
 
     comparisons = {
-        "residual_finetune_improvement_percent": comparison(
-            test_results["residual_frozen"],
-            test_results["residual_finetuned"],
-        ),
-        "query_finetune_improvement_percent": comparison(
-            test_results["query_frozen"],
-            test_results["query_finetuned"],
-        ),
-        "finetuned_query_vs_finetuned_residual_improvement_percent": comparison(
-            test_results["residual_finetuned"],
-            test_results["query_finetuned"],
-        ),
-        "frozen_query_vs_frozen_residual_improvement_percent": comparison(
-            test_results["residual_frozen"],
-            test_results["query_frozen"],
-        ),
+        f"{variant}_finetune_improvement_percent": comparison(
+            test_results[f"{variant}_frozen"],
+            test_results[f"{variant}_finetuned"],
+        )
+        for variant in variants
     }
+    if {"residual", "query"}.issubset(variants):
+        comparisons.update(
+            {
+                "finetuned_query_vs_finetuned_residual_improvement_percent": comparison(
+                    test_results["residual_finetuned"],
+                    test_results["query_finetuned"],
+                ),
+                "frozen_query_vs_frozen_residual_improvement_percent": comparison(
+                    test_results["residual_frozen"],
+                    test_results["query_frozen"],
+                ),
+            }
+        )
 
     split_summary = {
         split: {
@@ -915,11 +1023,17 @@ def main():
     }
     summary = {
         "protocol": PROTOCOL_VERSION,
+        "output_contract": {
+            "mode": "deterministic_residual_mean_only",
+            "channels": ["dx_body", "dy_body", "dvx", "dyawrate"],
+            "probability_output_enabled": False,
+        },
         "args": vars(args),
         "dataset_path": args.dataset_path,
         "split_unit": "acquisition_date_hour_minute",
+        "split_source": split_source,
         "split": split_summary,
-        "params": dict(checkpoints["residual"]["params"]),
+        "params": dict(reference_checkpoint["params"]),
         "pretrained_checkpoints": {
             variant: str(path) for variant, path in checkpoint_paths.items()
         },

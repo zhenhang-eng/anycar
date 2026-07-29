@@ -118,6 +118,8 @@ device = torch.device("cuda")
 assert device.type == "cuda", "Only cuda is supported"
 
 num_workers = env_int("ANYCAR_NUM_WORKERS", 6)
+max_dataset_files = env_int("ANYCAR_MAX_DATASET_FILES", 0)
+split_manifest_dir = env_str("ANYCAR_SPLIT_MANIFEST_DIR", "").strip()
 
 state_dim = 6
 action_dim = 2
@@ -264,6 +266,8 @@ def write_run_summary(
             'batch_size': batch_size,
             'lambda_l2': lambda_l2,
             'num_workers': num_workers,
+            'max_dataset_files': max_dataset_files,
+            'split_manifest_dir': split_manifest_dir,
             'state_dim': state_dim,
             'action_dim': action_dim,
             'latent_dim': latent_dim,
@@ -404,16 +408,43 @@ if architecture == "torch_decoder":
 
 # Load the dataset
 binary_mask = False
-dataset_files = sorted(glob.glob(os.path.join(dataset_path, '*.pkl'))) # get all *.pkl file in this path
-random.shuffle(dataset_files)
-total_len = len(dataset_files)
-split_70 = int(total_len * 0.7)
-split_80 = int(total_len * 0.8)
-split_20 = int(total_len * 0.9)
-split_5 = int(total_len * 0.95)
-data_70 = dataset_files[:split_80]
-data_20 = dataset_files[split_80:split_5]
-data_10 = dataset_files[split_5:]
+if split_manifest_dir:
+    if max_dataset_files > 0:
+        raise ValueError(
+            "ANYCAR_MAX_DATASET_FILES cannot be combined with "
+            "ANYCAR_SPLIT_MANIFEST_DIR"
+        )
+
+    def read_split_manifest(name):
+        manifest_path = os.path.join(split_manifest_dir, f"{name}_files.txt")
+        with open(manifest_path) as stream:
+            paths = [line.strip() for line in stream if line.strip()]
+        missing = [path for path in paths if not os.path.isfile(path)]
+        if missing:
+            raise FileNotFoundError(
+                f"{manifest_path} contains {len(missing)} missing files; "
+                f"first missing path: {missing[0]}"
+            )
+        return paths
+
+    data_70 = read_split_manifest("train")
+    data_20 = read_split_manifest("val")
+    data_10 = read_split_manifest("test")
+    split_sets = [set(data_70), set(data_20), set(data_10)]
+    if any(split_sets[i] & split_sets[j] for i, j in ((0, 1), (0, 2), (1, 2))):
+        raise ValueError("Split manifests contain overlapping file paths")
+    total_len = len(data_70) + len(data_20) + len(data_10)
+else:
+    dataset_files = sorted(glob.glob(os.path.join(dataset_path, '*.pkl')))
+    random.shuffle(dataset_files)
+    if max_dataset_files > 0:
+        dataset_files = dataset_files[:max_dataset_files]
+    total_len = len(dataset_files)
+    split_80 = int(total_len * 0.8)
+    split_5 = int(total_len * 0.95)
+    data_70 = dataset_files[:split_80]
+    data_20 = dataset_files[split_80:split_5]
+    data_10 = dataset_files[split_5:]
 write_list_file(SPLIT_FILE_PATHS['train'], data_70)
 write_list_file(SPLIT_FILE_PATHS['val'], data_20)
 write_list_file(SPLIT_FILE_PATHS['test'], data_10)

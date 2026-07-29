@@ -24,6 +24,20 @@ from car_foundation.utils import quaternion_to_euler, generate_subsequences, gen
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
+
+class _NumpyPickleCompatibilityUnpickler(pickle.Unpickler):
+    """Load NumPy 2.x array pickles in the supported NumPy 1.26 environment."""
+
+    def find_class(self, module, name):
+        if module.startswith("numpy._core"):
+            module = module.replace("numpy._core", "numpy.core", 1)
+        return super().find_class(module, name)
+
+
+def _load_pickle_compatible(path):
+    with open(path, "rb") as stream:
+        return _NumpyPickleCompatibilityUnpickler(stream).load()
+
 class DynamicsDataset(Dataset):
     def __init__(self, path, sequence_length, mean=None, std=None):
         # self.data = np.loadtxt(path, delimiter=',')
@@ -202,9 +216,11 @@ class MujocoDataset(Dataset):
         
         def load_pickle(file):
             try:
-                mujoco_raw_dataset = pickle.load(open(file, 'rb'))
-            except:
-                raise ValueError(f'Error loading the pickle file: {file}')
+                mujoco_raw_dataset = _load_pickle_compatible(file)
+            except Exception as error:
+                raise ValueError(
+                    f'Error loading the pickle file: {file}'
+                ) from error
             q = np.array([mujoco_raw_dataset.data_logs["xori_w"],
                         mujoco_raw_dataset.data_logs["xori_x"],
                         mujoco_raw_dataset.data_logs["xori_y"],
