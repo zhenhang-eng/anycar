@@ -16,6 +16,12 @@ else
     if [[ -d "$_ANYCAR_NVRTC_LIB" ]]; then
         export LD_LIBRARY_PATH="$_ANYCAR_NVRTC_LIB${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
     fi
+
+    # ONNX Runtime CUDA wheels load cuDNN directly rather than through PyTorch.
+    _ANYCAR_CUDNN_LIB="$_ANYCAR_PYTHON_SITE/nvidia/cudnn/lib"
+    if [[ -d "$_ANYCAR_CUDNN_LIB" ]]; then
+        export LD_LIBRARY_PATH="$_ANYCAR_CUDNN_LIB${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+    fi
 fi
 
 # Source the system ROS installation before the local workspace overlay.
@@ -51,5 +57,5 @@ if [[ -n "${_ANYCAR_PYTHON_VERSION:-}" ]]; then
     fi
 fi
 
-unset _ANYCAR_ROOT _ANYCAR_PYTHON_SITE _ANYCAR_PYTHON_VERSION _ANYCAR_NVRTC_LIB
+unset _ANYCAR_ROOT _ANYCAR_PYTHON_SITE _ANYCAR_PYTHON_VERSION _ANYCAR_NVRTC_LIB _ANYCAR_CUDNN_LIB
 unset _ANYCAR_FOUNDATION_INSTALL _ANYCAR_PLANNER_INSTALL
