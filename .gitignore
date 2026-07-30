@@ -5,6 +5,9 @@ bagfiles/
 .vscode/
 .vscode/*
 
+# Local external source tree; keep it out of the AnyCar GitHub repository.
+/nuplan-suite/
+
 ### Model weights
 car_foundation/models/*
 car_foundation/data/*
