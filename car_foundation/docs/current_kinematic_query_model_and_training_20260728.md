@@ -1,5 +1,7 @@
 # AnyCar 当前 Query 运动学残差模型与训练方式
 
+代码入口、数据流、checkpoint 字段和部署约束的总览见 [当前确定性 Query 模型、训练与代码功能总览](current_deterministic_query_model_code_guide_20260729.md)。
+
 本文描述本轮对比中“当前模型”的实际结构和训练口径。它不是旧版 6 维 direct `TorchTransformerDecoder`，而是：
 
 ```text
