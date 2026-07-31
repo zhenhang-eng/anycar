@@ -1,4 +1,8 @@
 from copy import deepcopy
+from dataclasses import asdict, dataclass
+import csv
+import json
+from pathlib import Path as FilePath
 import torch
 from termcolor import colored
 import rclpy
@@ -18,28 +22,30 @@ from sensor_msgs.msg import Joy
 from tf_transformations import quaternion_from_euler, euler_matrix, euler_from_quaternion
 
 from car_planner import CAR_PLANNER_ASSETS_DIR
-from models_jax import DynamicBicycleModel
-from controllers_jax import MPPIController, rollout_fn_select, MPPIRunningParams, void_fn
-from controllers_torch import PurePersuitParams, PurePersuitController
+from car_dynamics.controllers_torch import (
+    PurePersuitParams,
+    PurePersuitController,
+    TorchMPPIController,
+    TorchMPPIParams,
+)
+from car_dynamics.controllers_torch.dbm import TorchDynamicBicycleRolloutBackend
 from car_planner.global_trajectory import GlobalTrajectory, generate_circle_trajectory, generate_oval_trajectory, generate_rectangle_trajectory, generate_raceline_trajectory
-from models_jax import DynamicsJax
-from car_foundation import CAR_FOUNDATION_MODEL_DIR
+from car_foundation.query_deployment import (
+    OnnxQueryRolloutBackend,
+    QueryDeploymentModel,
+    QueryHistoryBuffer,
+    TorchQueryRolloutBackend,
+)
 import numpy as np
-import jax
-import jax.numpy as jnp
 import tf2_geometry_msgs
 import datetime
 
 
-print("DEVICE", jax.devices())
-
-from car_ros2.utils import load_dynamic_params, load_mppi_params, load_env_params_mujoco, load_env_params_numeric, load_env_params_isaacsim, load_env_params_unity, load_dynamic_params_correct, load_dynamic_params_uncorrect
+print("DEVICE", torch.cuda.get_device_name(0) if torch.cuda.is_available() else "cpu")
 
 import threading
 from multiprocessing.pool import ThreadPool
 
-
-from models_jax.dbm import CarState, CarAction
 
 unique_prefix = datetime.datetime.now().isoformat(timespec='milliseconds')
 
@@ -58,86 +64,133 @@ import os
 os.environ["OMP_NUM_THREADS"] = "1"
 
 
+@dataclass(frozen=True)
+class QueryVehicleParams:
+    """Only the geometry/timing values used by the Query-model ROS node."""
+
+    LF: float = 1.95
+    LR: float = 1.95
+    DT: float = 0.05
+
+    def to_dict(self):
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class QueryRuntimeEnvironment:
+    name: str = "query-model"
+    mass: float = 0.0
+    friction: float = 0.0
+    delay: int = 0
+
+
 class CarNode(Node):
     def __init__(self):
         super().__init__('car_node')
         
         print("Car node start")
-        self.env_params = load_env_params_numeric()
-        self.model_params = load_dynamic_params()
-        # self.model_params = load_dynamic_params_correct()
-        # self.model_params = load_dynamic_params_uncorrect()
-        self.mppi_params = load_mppi_params()
+        self.env_params = QueryRuntimeEnvironment()
+        self.model_params = QueryVehicleParams()
+        self.control_dt = 0.05
 
         # NOTE: Can choose either 'mppi' or 'pure_persuit'
         # self.controller_type = 'pure_persuit'
         self.controller_type = 'mppi'
         
-        self.L = self.model_params.LF + self.model_params.LR
-        self._counter = 0        
-        print("DYANMICS", self.mppi_params.dynamics)
+        self._counter = 0
         if self.controller_type == 'mppi':
-            ## MPPI Configself.mppi_running_params_warmup
-            DYNAMICS = self.mppi_params.dynamics
-            if DYNAMICS == "dbm":
-                self.dynamics = DynamicBicycleModel(self.model_params)
-                self.dynamics.reset()
-                self.rollout_fn = rollout_fn_select('dbm', self.dynamics, self.model_params.DT, self.L, self.model_params.LR)
-            elif DYNAMICS == "transformer-torch":
-                from models_torch.nn_dynamics import DynamicsTorch
-                ## Load Transformer
-                self.dynamics = DynamicsTorch({DynamicsJax({'model_path':os.path.join(CAR_FOUNDATION_MODEL_DIR, "2024-07-15T17:56:55.014-model_checkpoint", f"{400}", "default")})})
-                # self.dynamics = DynamicsJax({})
-                print(colored(type(self.dynamics), "blue"))
-                self.rollout_fn = rollout_fn_select('transformer-torch', self.dynamics, self.model_params.DT, self.L, self.model_params.LR)
-            elif DYNAMICS == "transformer-jax":
-                ## Load Transformer
-                self.dynamics = DynamicsJax({
-                    "model_path": os.path.join(CAR_FOUNDATION_MODEL_DIR, "anycar_model_checkpoint/500/default"), # pt
-                    # "model_path": os.path.join(CAR_FOUNDATION_MODEL_DIR, "2024-11-07-model_checkpoint/400/default"), # pt
-                })
-                print(colored("Loaded JAX transformer model", "green"))
-                print(colored(type(self.dynamics), "blue"))
-                self.rollout_fn = rollout_fn_select('transformer-jax', self.dynamics, self.model_params.DT, self.L, self.model_params.LR)
+            repository_root = os.environ.get("CAR_PATH", "/home/plusai/anycar")
+            default_checkpoint = os.path.join(
+                repository_root,
+                "outputs/formal_real_finetune_query_baseline_split/"
+                "20260728T143256/query_best.pt",
+            )
+            default_onnx = os.path.join(
+                repository_root, "outputs/query_mppi/anycar_query.onnx"
+            )
+            backend_name = self.declare_parameter(
+                "mppi_backend", "pytorch"
+            ).value
+            checkpoint_path = self.declare_parameter(
+                "query_checkpoint", default_checkpoint
+            ).value
+            onnx_path = self.declare_parameter(
+                "query_onnx_path", default_onnx
+            ).value
+            self.mppi_snapshot_step = int(
+                self.declare_parameter("mppi_snapshot_step", -1).value
+            )
+            self.mppi_snapshot_dir = str(
+                self.declare_parameter("mppi_snapshot_dir", "").value
+            )
+            self.mppi_snapshot_written = False
+            self.mppi_backend_name = backend_name
+            self.query_checkpoint_path = checkpoint_path
+            num_samples = int(
+                self.declare_parameter("mppi_num_samples", 256).value
+            )
+            num_iterations = int(
+                self.declare_parameter("mppi_num_iterations", 1).value
+            )
+            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            if backend_name == "pytorch":
+                deployment_model = QueryDeploymentModel.from_checkpoint(
+                    checkpoint_path, device
+                )
+                rollout_backend = TorchQueryRolloutBackend(deployment_model)
+                self.control_dt = deployment_model.dt
+                self.model_params = QueryVehicleParams(
+                    LF=0.5 * deployment_model.wheelbase,
+                    LR=0.5 * deployment_model.wheelbase,
+                    DT=deployment_model.dt,
+                )
+            elif backend_name == "onnx":
+                if not os.path.isfile(onnx_path):
+                    raise FileNotFoundError(
+                        f"Query ONNX model not found: {onnx_path}. "
+                        "Export it before starting car_node."
+                    )
+                rollout_backend = OnnxQueryRolloutBackend(
+                    onnx_path, provider="cuda", output_device=device
+                )
+                checkpoint = torch.load(checkpoint_path, map_location="cpu")
+                query_params = checkpoint["params"]
+                self.control_dt = float(query_params["dt"])
+                wheelbase = float(query_params["wheelbase"])
+                self.model_params = QueryVehicleParams(
+                    LF=0.5 * wheelbase,
+                    LR=0.5 * wheelbase,
+                    DT=self.control_dt,
+                )
+            elif backend_name == "dbm":
+                rollout_backend = TorchDynamicBicycleRolloutBackend()
+                self.model_params = QueryVehicleParams(
+                    LF=0.1008, LR=0.1092, DT=self.control_dt
+                )
             else:
-                raise ValueError(f"Invalid dynamics model: {DYNAMICS}")
-            
-            
-            self.key = jax.random.PRNGKey(0)
-            key, self.key = jax.random.split(self.key)
-            self.mppi = MPPIController(
-                self.mppi_params, self.rollout_fn, void_fn, key
+                raise ValueError(
+                    "mppi_backend must be 'pytorch', 'onnx', or 'dbm', "
+                    f"got {backend_name!r}"
+                )
+            self.mppi_params = TorchMPPIParams(
+                num_samples=num_samples,
+                num_iterations=num_iterations,
             )
-
-            self.mppi_running_params = self.mppi.get_init_params()
-
-            self.key, key2 = jax.random.split(self.key)
-
-
-            self.mppi_running_params = MPPIRunningParams(
-                a_mean = self.mppi_running_params.a_mean,
-                a_cov = self.mppi_running_params.a_cov,
-                prev_a = self.mppi_running_params.prev_a,
-                state_hist = self.mppi_running_params.state_hist,
-                key = key2,
+            if abs(self.control_dt - self.mppi_params.dt) > 1e-9:
+                raise ValueError(
+                    f"Query checkpoint dt={self.control_dt} does not match "
+                    f"MPPI dt={self.mppi_params.dt}"
+                )
+            self.mppi = TorchMPPIController(
+                rollout_backend, self.mppi_params, device=device
             )
-
-            ## Define the warmup MPPI Based on DBM model
-            self.mppi_params_warmup = load_mppi_params()
-            self.mppi_params_warmup.dynamics = 'dbm'
-            self.dynamics_warmup = DynamicBicycleModel(self.model_params)
-            self.dynamics_warmup.reset()
-            self.rollout_fn_warmup = rollout_fn_select('dbm', self.dynamics_warmup, self.model_params.DT, self.L, self.model_params.LR)
-            self.key, key2 = jax.random.split(self.key, 2)
-            self.mppi_warmup = MPPIController(self.mppi_params_warmup, self.rollout_fn_warmup, void_fn, key2)
-            self.mppi_running_params_warmup = self.mppi_warmup.get_init_params()
-            self.key, key2 = jax.random.split(self.key, 2)
-            self.mppi_running_params_warmup = MPPIRunningParams(
-                a_mean = self.mppi_running_params_warmup.a_mean,
-                a_cov = self.mppi_running_params_warmup.a_cov,
-                prev_a = self.mppi_running_params_warmup.prev_a,
-                state_hist = self.mppi_running_params_warmup.state_hist,
-                key = key2,
+            self.mppi_running_params = self.mppi.get_init_state()
+            self.query_history = QueryHistoryBuffer(dt=self.control_dt)
+            self.get_logger().info(
+                f"Query MPPI backend={backend_name}, device={device}, "
+                f"dt={self.control_dt}, wheelbase="
+                f"{self.model_params.LF + self.model_params.LR}, "
+                f"samples={num_samples}"
             )
         elif self.controller_type == 'pure_persuit':
             ## Pure pursuit controller
@@ -151,6 +204,8 @@ class CarNode(Node):
                 pure_persuit_params.wheelbase = 0.2
                 pure_persuit_params.kp = 3.
             self.pure_pursuit = PurePersuitController(pure_persuit_params)
+
+        self.L = self.model_params.LF + self.model_params.LR
 
         pure_persuit_params = PurePersuitParams()
         if 'numeric' in self.env_params.name or \
@@ -170,7 +225,8 @@ class CarNode(Node):
         # 3. .csv
         # track = np.loadtxt(os.path.join(CAR_PLANNER_ASSETS_DIR, "math_park_v2.txt"), delimiter=',', skiprows=1)
         # track = generate_oval_trajectory((0., -20.0), 20.0, 20.0, direction=-1)
-        track = np.loadtxt(os.path.join(CAR_PLANNER_ASSETS_DIR, "cuc_inside.csv"), delimiter=',', skiprows=1)
+        self.track_path = os.path.join(CAR_PLANNER_ASSETS_DIR, "cuc_inside.csv")
+        track = np.loadtxt(self.track_path, delimiter=',', skiprows=1)
 
         self.global_planner = GlobalTrajectory(track)
         self.step_mode_ = self.declare_parameter('step_mode', False).value
@@ -180,7 +236,7 @@ class CarNode(Node):
         self.ref_trajectory_pub_ = self.create_publisher(Path, 'ref_trajectory', 1)
         self.pose_pub_ = self.create_publisher(PoseWithCovarianceStamped, 'pose', 1)
         # if not self.step_mode_:
-        #     self.timer_ = self.create_timer(self.model_params.DT, self.timer_callback)
+        #     self.timer_ = self.create_timer(self.control_dt, self.timer_callback)
         self.slow_timer_ = self.create_timer(1.0, self.slow_timer_callback)
         self.throttle_pub_ = self.create_publisher(Float64, 'speed', 1)
         self.steer_pub_ = self.create_publisher(Float64, 'steering', 1)
@@ -234,13 +290,158 @@ class CarNode(Node):
         while True:
             self.timer_callback()
 
+    def _write_mppi_snapshot(
+        self,
+        query_state,
+        full_state,
+        current_action,
+        history,
+        reference,
+        frenet_pose,
+        mean_knots_before,
+        rng_state_before,
+        action,
+        running_state_after,
+        mppi_info,
+    ):
+        """Persist one atomic controller call for sampling/cost experiments."""
+        output_dir = FilePath(self.mppi_snapshot_dir).expanduser().resolve()
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        sampled_action = mppi_info["sampled_action_sequences"].cpu().numpy()
+        sampled_trajectory = mppi_info["sampled_trajectories"].cpu().numpy()
+        cost = mppi_info["cost"].cpu().numpy()
+        weight = mppi_info["weight"].cpu().numpy()
+        components = {
+            name: value.cpu().numpy()
+            for name, value in mppi_info["cost_components"].items()
+        }
+        sampled_knots = self.mppi._sequence_to_knots(
+            mppi_info["sampled_action_sequences"]
+        ).cpu().numpy()
+        best_index = int(np.argmin(cost))
+        rng_state_after = self.mppi._generator.get_state().cpu().numpy()
+
+        snapshot_path = output_dir / "snapshot.npz"
+        np.savez_compressed(
+            snapshot_path,
+            initial_state=np.asarray(query_state, dtype=np.float32),
+            initial_state_six=np.asarray(full_state, dtype=np.float32),
+            initial_lateral_velocity=np.asarray(full_state[4], dtype=np.float32),
+            current_action=np.asarray(current_action, dtype=np.float32),
+            history=history.cpu().numpy(),
+            reference=np.asarray(reference, dtype=np.float32),
+            mean_knots_before=mean_knots_before.cpu().numpy(),
+            mean_knots_after=running_state_after.mean_knots.cpu().numpy(),
+            rng_state_before=rng_state_before.cpu().numpy(),
+            rng_state_after=rng_state_after,
+            sampled_knots=sampled_knots,
+            sampled_action_sequences=sampled_action,
+            predicted_trajectories=sampled_trajectory,
+            cost=cost,
+            weight=weight,
+            optimized_action=np.asarray(action, dtype=np.float32),
+            optimized_action_sequence=(
+                mppi_info["optimized_action_sequence"].cpu().numpy()
+            ),
+            **{f"cost_{name}": value for name, value in components.items()},
+        )
+
+        component_names = list(components)
+        with (output_dir / "candidate_costs.csv").open("w", newline="") as stream:
+            writer = csv.writer(stream)
+            writer.writerow(
+                [
+                    "candidate_index",
+                    "total_cost",
+                    *[f"cost_{name}" for name in component_names],
+                    "mppi_weight",
+                    "first_acceleration",
+                    "first_steering",
+                ]
+            )
+            for index in range(len(cost)):
+                writer.writerow(
+                    [
+                        index,
+                        cost[index],
+                        *[components[name][index] for name in component_names],
+                        weight[index],
+                        sampled_action[index, 0, 0],
+                        sampled_action[index, 0, 1],
+                    ]
+                )
+
+        ranking = np.argsort(cost)
+        summary = {
+            "format_version": 1,
+            "scenario": {
+                "source": "live clean Quick Start simulation",
+                "observation_noise": False,
+                "control_step": self._counter,
+                "simulated_time_s": self._counter * self.control_dt,
+                "track": str(FilePath(self.track_path).resolve()),
+                "frenet_s_m": float(frenet_pose.s),
+                "frenet_lateral_m": float(frenet_pose.t),
+                "frenet_heading_error_rad": float(frenet_pose.xi),
+                "query_state": np.asarray(query_state).tolist(),
+                "full_state": np.asarray(full_state).tolist(),
+                "current_action": np.asarray(current_action).tolist(),
+            },
+            "model": (
+                {
+                    "backend": "dbm",
+                    "checkpoint": None,
+                    "dbm_params": asdict(self.mppi.rollout_backend.params),
+                    "uses_observed_lateral_velocity": True,
+                }
+                if self.mppi_backend_name == "dbm"
+                else {
+                    "backend": self.mppi_backend_name,
+                    "checkpoint": str(
+                        FilePath(self.query_checkpoint_path).resolve()
+                    ),
+                }
+            ),
+            "mppi_params": asdict(self.mppi_params),
+            "cost_weights": asdict(self.mppi.cost_weights),
+            "baseline": {
+                "candidate_count": len(cost),
+                "best_candidate_index": best_index,
+                "best_cost": float(cost[best_index]),
+                "mean_cost": float(cost.mean()),
+                "median_cost": float(np.median(cost)),
+                "p95_cost": float(np.percentile(cost, 95)),
+                "max_cost": float(cost.max()),
+                "effective_sample_size": float(
+                    mppi_info["effective_sample_size"].cpu()
+                ),
+                "optimized_action": np.asarray(action).tolist(),
+                "best_cost_components": {
+                    name: float(values[best_index])
+                    for name, values in components.items()
+                },
+                "top_10_candidate_indices": ranking[:10].tolist(),
+                "top_10_costs": cost[ranking[:10]].tolist(),
+            },
+            "artifacts": {
+                "snapshot": str(snapshot_path),
+                "candidate_costs_csv": str(output_dir / "candidate_costs.csv"),
+            },
+        }
+        (output_dir / "summary.json").write_text(
+            json.dumps(summary, indent=2) + "\n"
+        )
+        self.mppi_snapshot_written = True
+        self.get_logger().info(f"MPPI snapshot written to {output_dir}")
+
     def timer_callback(self):
 
         start_time = self.get_clock().now()
         # print("here")
         if self.odom is None:
             print("ODOM NOT FOUND!")
-            # time.sleep(self.model_params.DT)
+            # time.sleep(self.control_dt)
             return
 
         if TELEOP and self.joy is None:
@@ -277,19 +478,20 @@ class CarNode(Node):
         ], dtype=np.float32)
         
         state = np.array([self.odom.pose.pose.position.x, self.odom.pose.pose.position.y, rpy[2], self.odom.twist.twist.linear.x, self.odom.twist.twist.linear.y, self.odom.twist.twist.angular.z], dtype=np.float32)
-        
-        ## Initialize the history
-        if self._counter == 0:        # state = env.obs_state()
-            if self.controller_type == 'mppi':
-                for _ in range(250):
-                    self.mppi_running_params = self.mppi.feed_hist(self.mppi_running_params, state, np.array([0., 0.]))
+        query_state = state[[0, 1, 2, 3, 5]]
+        if self._counter == 0 and self.controller_type == 'mppi':
+            self.query_history.prime_constant_motion(
+                query_state, self.prev_action
+            )
         
         if np.any(np.isnan(state)):
             return
         
         # print("State", state)
         ## Generate reference trajectory
-        target_pos_arr, frenet_pose = self.global_planner.generate(state[:5], self.model_params.DT, (self.mppi_params.h_knot - 1) * self.mppi_params.num_intermediate + 2 + self.mppi_params.delay, True)
+        target_pos_arr, frenet_pose = self.global_planner.generate(
+            state[:5], self.control_dt, self.mppi_params.horizon + 1, True
+        )
         target_pos_arr[:, 3] = np.clip(target_pos_arr[:, 3], 0.0, SAFE_SPEED_MAX)
         target_pos_list = np.array(target_pos_arr)
 
@@ -298,39 +500,45 @@ class CarNode(Node):
         action_candidate_np = None
         sampled_traj = None
         if self.controller_type == 'mppi':
-            if hasattr(self.dynamics, "reset"):
-                self.dynamics.reset()
-            _ctr_start = time.time()    
-            target_pos_tensor = jnp.array(target_pos_arr)
-            dynamic_params_tuple = (self.model_params.LF, self.model_params.LR, self.model_params.MASS, self.model_params.DT, self.model_params.K_RFY, self.model_params.K_FFY, self.model_params.Iz, self.model_params.Ta, self.model_params.Tb, self.model_params.Sa, self.model_params.Sb, self.model_params.mu, self.model_params.Cf, self.model_params.Cr, self.model_params.Bf, self.model_params.Br, self.model_params.hcom, self.model_params.fr)
-            
-            if self.mppi_params.dual and self._counter % 1 == 0:   # dual and update params every frame ?? 
-                # DUAL MPPI AS WARMUP
-                self.mppi_running_params_warmup = MPPIRunningParams(
-                    a_mean = self.mppi_running_params.a_mean,      # ??? wrong ??????
-                    a_cov = self.mppi_running_params_warmup.a_cov,
-                    prev_a = self.mppi_running_params_warmup.prev_a,
-                    state_hist = self.mppi_running_params_warmup.state_hist,
-                    key = self.mppi_running_params_warmup.key,
+            _ctr_start = time.time()
+            if self.mppi_backend_name == "dbm":
+                self.mppi.rollout_backend.set_initial_lateral_velocity(state[4])
+            mppi_history = self.query_history.tensor()
+            snapshot_this_step = (
+                not self.mppi_snapshot_written
+                and self.mppi_snapshot_step == self._counter
+                and bool(self.mppi_snapshot_dir)
+            )
+            if snapshot_this_step:
+                mean_knots_before = self.mppi_running_params.mean_knots.detach().clone()
+                rng_state_before = self.mppi._generator.get_state().detach().clone()
+                current_action_before = self.prev_action.copy()
+            action, self.mppi_running_params, mppi_info = self.mppi(
+                query_state,
+                self.prev_action,
+                mppi_history,
+                target_pos_arr,
+                self.mppi_running_params,
+            )
+            action = action.cpu().numpy().astype(np.float32)
+            if snapshot_this_step:
+                self._write_mppi_snapshot(
+                    query_state,
+                    state,
+                    current_action_before,
+                    mppi_history,
+                    target_pos_arr,
+                    frenet_pose,
+                    mean_knots_before,
+                    rng_state_before,
+                    action,
+                    self.mppi_running_params,
+                    mppi_info,
                 )
-                
-                _, self.mppi_running_params_warmup, _ = self.mppi_warmup(state, target_pos_tensor, self.mppi_running_params_warmup, dynamic_params_tuple)
-            
-                self.mppi_running_params = MPPIRunningParams(
-                    a_mean = (self.mppi_running_params_warmup.a_mean + self.mppi_running_params.a_mean) / 2,
-                    a_cov = self.mppi_running_params.a_cov,
-                    prev_a = self.mppi_running_params.prev_a,
-                    state_hist = self.mppi_running_params.state_hist,
-                    key = self.mppi_running_params.key,
-                )
-            
-            action, self.mppi_running_params, mppi_info = self.mppi(state,target_pos_tensor,self.mppi_running_params, dynamic_params_tuple)
-
-            st_ = time.time()
-            action = np.array(action, dtype=np.float32)
-            
-            action_candidate_np = np.array(mppi_info['a_mean_jnp'])
-            sampled_traj = np.array(mppi_info['trajectory'][:, :2])  
+            action_candidate_np = (
+                mppi_info["optimized_action_sequence"].cpu().numpy()
+            )
+            sampled_traj = mppi_info["trajectory"][:, :2].cpu().numpy()
             print("ctr time", time.time() - _ctr_start)
 
         elif self.controller_type == 'pure_persuit':
@@ -361,7 +569,7 @@ class CarNode(Node):
         #  append history here because we sometimes wants to overwirte the mppi action 
         #  with other controllers (e.g. pure pursuit)
         if self.controller_type == 'mppi':
-            self.mppi_running_params = self.mppi.feed_hist(self.mppi_running_params, state, action)
+            self.query_history.append(query_state, action)
     
 
         action_rate = action - self.prev_action
@@ -453,11 +661,11 @@ class CarNode(Node):
         end_time = self.get_clock().now()
         duration_sec = (end_time - start_time).nanoseconds / 1e9
         print(colored(f"duration: {duration_sec:.3f}", "red"))
-        if duration_sec > self.model_params.DT:
+        if duration_sec > self.control_dt:
             # print("Out of time!")
-            self.get_logger().warn(f"MPPI took {duration_sec} seconds which is longer than DT {self.model_params.DT} seconds.", throttle_duration_sec=1.0)
+            self.get_logger().warn(f"MPPI took {duration_sec} seconds which is longer than DT {self.control_dt} seconds.", throttle_duration_sec=1.0)
         else:
-            sleep_time = self.model_params.DT - duration_sec
+            sleep_time = self.control_dt - duration_sec
             time.sleep(sleep_time)
 
         self.vehicle_cmd_pub_.publish(cmd)

@@ -222,7 +222,8 @@ Kinematic query 的兼容迁移由其专用脚本处理；主训练入口当前�
 
 ## 6. 当前实现约束与风险
 
-1. **CUDA 硬依赖**：`_build_history_emb()` 内部直接调用 `.cuda()` 和 `torch.cuda.current_stream()`，所以即使构造函数传入 CPU device，完整 forward 也不能在 CPU 上运行；多 GPU 场景下还需确认默认 CUDA device 与 `self.device` 一致。
+1. **设备语义**：`_build_history_emb()` 当前按输入和 model device 执行，不再直接
+   调用 `.cuda()`；部署 forward 支持 CPU/CUDA。正式训练入口仍要求 CUDA。
 2. **eval batch 共享 history**：这是候选 action 批量推理的特化假设，不适用于普通异构推理 batch。
 3. **固定序列长度**：learned position embedding 和 50×50 causal mask 按默认长度创建。当前主路径应使用 250 帧 history 和 50 帧 action；修改长度时必须同步核对卷积输出长度、position embedding 和 mask。
 4. **padding mask 尺寸**：若传 `history_padding_mask`，其长度应对应压缩并交错后的 83 个 memory token，而不是原始 250 帧。主训练脚本目前传 `None`。

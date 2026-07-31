@@ -556,11 +556,14 @@ python scripts/model_verify/finetune_real_kinematic_residual.py \
 
 ## 13. 已知约束和下一步工程工作
 
-1. 模型内部 `_build_history_emb()` 使用 `.cuda()`，当前实现只支持 NVIDIA GPU；训练脚本也显式要求 CUDA。
+1. 模型内部 `_build_history_emb()` 已按输入/model device 执行，部署 forward 可在
+   CPU 或 CUDA 运行；正式训练脚本仍显式要求 CUDA，以避免在 CPU 上误启动长训练。
 2. History CNN 和 learned position embedding 当前固定按 250 帧设计；预训练入口会拒绝其他 history 长度。
 3. Prediction horizon 固定为 50，修改时必须同步 causal mask、位置编码、数据窗口和 checkpoint。
 4. `eval()` 普通 forward 默认共享第一条 history；不同 history batch 必须使用独立 history helper。
 5. 实车离线评估使用 realized future control；在线部署必须由规划器提供 future action。
 6. 当前仿真正式训练仍是 file-level seeded split，严格跨 session manifest 尚未接到预训练入口。
-7. 当前 Query 模型尚无专用 ONNX 导出/验证脚本；旧 `verify_model_for_onnx.py` 的 6 维 direct 协议不能直接复用。
+7. 当前 Query 模型已提供专用 PyTorch/ONNX MPPI 部署图、导出验证脚本和
+   纯 PyTorch MPPI；接口和运行方式见
+   [Query 模型的 PyTorch / ONNX MPPI 接入](query_mppi_pytorch_onnx_20260730.md)。
 8. 概率输出已暂停。重新启用前应作为单独任务审查，不应修改当前确定性输出接口。

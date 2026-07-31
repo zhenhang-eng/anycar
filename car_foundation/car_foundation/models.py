@@ -188,19 +188,20 @@ class TorchTransformerDecoder(nn.Module):
         state = history[..., :self.state_dim].permute(0, 2, 1).contiguous()
         action = history[..., self.state_dim:].permute(0, 2, 1).contiguous()
 
-        with torch.cuda.stream(torch.cuda.current_stream()):  # 使用单独的CUDA流
+        # Keep the encoder on the model/input device.  The previous explicit
+        # ``.cuda()`` calls made an otherwise device-agnostic PyTorch model
+        # impossible to run on CPU and complicated ONNX reference checks.
+        state_compressed = self.compressor['state'](state)
+        action_compressed = self.compressor['action'](action)
 
-            # 直接在GPU上进行卷积计算
-            state_compressed = self.compressor['state'](state.cuda())
-            action_compressed = self.compressor['action'](action.cuda())
-        
-            # 优化内存布局转换
-            state_emb = self.embedding['state'](state_compressed.transpose(1, 2))
-            action_emb = self.embedding['action'](action_compressed.transpose(1, 2))
+        state_emb = self.embedding['state'](state_compressed.transpose(1, 2))
+        action_emb = self.embedding['action'](action_compressed.transpose(1, 2))
 
-            interleaved = torch.stack([state_emb, action_emb], dim=2)
-            interleaved = interleaved.view(interleaved.size(0), -1, interleaved.size(-1))
-            return interleaved[:, :-1, :]
+        interleaved = torch.stack([state_emb, action_emb], dim=2)
+        interleaved = interleaved.view(
+            interleaved.size(0), -1, interleaved.size(-1)
+        )
+        return interleaved[:, :-1, :]
 
     def forward(self, history, action, history_padding_mask=None, action_padding_mask=None):
         if not self.training:  

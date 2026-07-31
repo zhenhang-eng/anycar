@@ -181,8 +181,12 @@ def monitor_gpu_while_running(fn, duration_seconds):
 
 
 def measure_batch(session, checkpoint, batch_size, args):
-    history, action = make_inputs(checkpoint, batch_size, args.seed + batch_size)
-    fn = lambda: run(session, history, action)
+    history, initial_state, current_action, action = make_inputs(
+        checkpoint, batch_size, args.seed + batch_size
+    )
+    fn = lambda: run(
+        session, history, initial_state, current_action, action
+    )
     for _ in range(args.warmup):
         fn()
 

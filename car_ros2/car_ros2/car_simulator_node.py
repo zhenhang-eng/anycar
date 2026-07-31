@@ -33,6 +33,11 @@ class CarSimulatorNode(Node):
         # self.env_params = load_uncorrect_env_params_numeric()
 
         self.env = make_env(self.env_params)
+        self.get_logger().info(
+            "Numeric DBM scenario: "
+            f"dt={self.env.sim.params.DT}, wheelbase={self.env.wheelbase}, "
+            f"mass={self.env.sim.params.MASS}, friction={self.env.sim.params.mu}"
+        )
 
         self.initialized = False
 

@@ -14,6 +14,7 @@ class CarEnvParams:
     steer_bias: float
     wheelbase: float
     com: Union[float, List[float]]
+    dt: float = 0.02
 
 
 def make_env(params: CarEnvParams):
@@ -31,6 +32,7 @@ def make_env(params: CarEnvParams):
             Sb = params.steer_bias,
             LF = params.wheelbase * params.com,
             LR = params.wheelbase * (1 - params.com),
+            DT = params.dt,
             ## temp test different model
         )
         dynamics = DynamicBicycleModel(dynamic_param)

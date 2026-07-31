@@ -17,6 +17,7 @@ def load_env_params_numeric() -> CarEnvParams:
         steer_bias=0.025,
         wheelbase=0.21,
         com=0.48,
+        dt=0.05,
     )
 
 def load_uncorrect_env_params_numeric() -> CarEnvParams:

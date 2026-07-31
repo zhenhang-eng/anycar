@@ -1,4 +1,4 @@
-from setuptools import setup
+from setuptools import find_packages, setup
 
 setup(
     name='car_dynamics',
@@ -6,7 +6,7 @@ setup(
     author='Wenli Xiao',
     author_email='wxiao2@andrew.cmu.edu',
     description='Tools for RC Car Dynamics',
-    packages=['car_dynamics'],
+    packages=find_packages(),
     install_requires=[
         'flax',
         'termcolor',

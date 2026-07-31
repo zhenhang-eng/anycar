@@ -5,10 +5,11 @@ Every configured strategy must process the same total number of candidates.
 For example, ``100x10,1000x1,10x100`` means batch size x call count and
 processes 1000 candidates with each strategy.
 
-The exported graph includes history normalization inversion for the current
-state, the nominal kinematic rollout, the deterministic Query residual model,
-residual de-normalization, and the physically consistent final rollout.  Its
-only runtime inputs are normalized history and future action.
+The exported graph includes history normalization, the nominal kinematic
+rollout, the deterministic Query residual model, residual de-normalization,
+and the physically consistent final rollout.  Runtime inputs follow the
+training protocol exactly: raw transition history, absolute current state,
+current action, and candidate future actions.
 """
 
 from __future__ import annotations
@@ -26,7 +27,6 @@ import numpy as np
 import onnx
 import onnxruntime as ort
 import torch
-import torch.nn as nn
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -35,144 +35,17 @@ for package_dir in ("car_foundation", "car_planner", "car_dynamics", "car_datase
     sys.path.insert(0, str(REPO_ROOT / package_dir))
 sys.path.insert(0, str(REPO_ROOT))
 
-from car_foundation.kinematic_residual import (  # noqa: E402
-    KinematicBicycleParams,
-    states_relative_to_initial_body,
-)
-from car_foundation.models import (  # noqa: E402
-    TorchTransformerDecoderKinematicQueryMLP,
+from car_foundation.query_deployment import (  # noqa: E402
+    QueryDeploymentModel,
+    export_query_onnx,
 )
 
 
 DEFAULT_CHECKPOINT = REPO_ROOT / (
-    "outputs/formal_kinematic_residual_query_30epoch/"
-    "20260728T114849/query_best.pt"
+    "outputs/formal_real_finetune_query_baseline_split/"
+    "20260728T143256/query_best.pt"
 )
 DEFAULT_OUTPUT_DIR = REPO_ROOT / "outputs/onnx_batch_benchmark"
-
-
-class AnyCarQueryDeploymentWrapper(nn.Module):
-    """Full deterministic Query-model inference graph for deployment."""
-
-    def __init__(self, model: nn.Module, checkpoint: dict):
-        super().__init__()
-        self.model = model
-        stats = checkpoint["stats"]
-        for name in (
-            "history",
-            "context",
-            "residual",
-            "nominal_state",
-            "nominal_transition",
-        ):
-            mean, std = stats[name]
-            self.register_buffer(f"{name}_mean", mean.detach().float())
-            self.register_buffer(f"{name}_std", std.detach().float())
-        self.params = KinematicBicycleParams(**checkpoint["params"])
-
-    def _kinematic_transition(self, state, action):
-        vx = state[..., 3]
-        yawrate = state[..., 4]
-        acceleration = action[..., 0]
-        front_wheel_angle = (
-            action[..., 1] - self.params.steering_offset
-        ) / self.params.steering_ratio
-        dvx = acceleration * self.params.dt
-        vx_mid = vx + 0.5 * dvx
-        yawrate_next = (
-            vx_mid * torch.tan(front_wheel_angle) / self.params.wheelbase
-        )
-        return torch.stack(
-            (
-                vx_mid * self.params.dt,
-                torch.zeros_like(vx),
-                dvx,
-                yawrate_next - yawrate,
-            ),
-            dim=-1,
-        )
-
-    def _apply_transition(self, state, transition):
-        yaw = state[..., 2]
-        cos_yaw = torch.cos(yaw)
-        sin_yaw = torch.sin(yaw)
-        next_yaw_unwrapped = yaw + state[..., 4] * self.params.dt
-        return torch.stack(
-            (
-                state[..., 0]
-                + transition[..., 0] * cos_yaw
-                - transition[..., 1] * sin_yaw,
-                state[..., 1]
-                + transition[..., 0] * sin_yaw
-                + transition[..., 1] * cos_yaw,
-                torch.atan2(
-                    torch.sin(next_yaw_unwrapped),
-                    torch.cos(next_yaw_unwrapped),
-                ),
-                state[..., 3] + transition[..., 2],
-                state[..., 4] + transition[..., 3],
-            ),
-            dim=-1,
-        )
-
-    def _nominal_rollout(self, initial_state, action):
-        state = initial_state
-        states = []
-        transitions = []
-        for step in range(action.shape[1]):
-            transition = self._kinematic_transition(state, action[:, step])
-            state = self._apply_transition(state, transition)
-            transitions.append(transition)
-            states.append(state)
-        return torch.stack(states, dim=1), torch.stack(transitions, dim=1)
-
-    def _residual_rollout(self, initial_state, action, residual):
-        state = initial_state
-        states = []
-        for step in range(action.shape[1]):
-            transition = self._kinematic_transition(state, action[:, step])
-            state = self._apply_transition(
-                state, transition + residual[:, step]
-            )
-            states.append(state)
-        return torch.stack(states, dim=1)
-
-    def forward(self, history: torch.Tensor, action: torch.Tensor):
-        # History state channels are normalized; the two action channels are raw.
-        initial_state = (
-            history[:, -1, :5] * self.history_std + self.history_mean
-        )
-        current_context = torch.cat(
-            (initial_state[:, 3:5], history[:, -1, 5:7]), dim=-1
-        )
-        current_context = (
-            current_context - self.context_mean
-        ) / self.context_std
-
-        nominal_absolute, nominal_transition = self._nominal_rollout(
-            initial_state, action
-        )
-        nominal_state = states_relative_to_initial_body(
-            initial_state, nominal_absolute
-        )
-        nominal_state = (
-            nominal_state - self.nominal_state_mean
-        ) / self.nominal_state_std
-        nominal_transition_normalized = (
-            nominal_transition - self.nominal_transition_mean
-        ) / self.nominal_transition_std
-
-        residual_normalized = self.model(
-            history,
-            action,
-            current_context,
-            nominal_state,
-            nominal_transition_normalized,
-        )
-        residual = (
-            residual_normalized * self.residual_std + self.residual_mean
-        )
-        return self._residual_rollout(initial_state, action, residual)
 
 
 def parse_args():
@@ -203,30 +76,6 @@ def parse_args():
     return parser.parse_args()
 
 
-def build_model(checkpoint: dict, device: torch.device):
-    args = checkpoint["args"]
-    model = TorchTransformerDecoderKinematicQueryMLP(
-        state_dim=5,
-        action_dim=2,
-        output_dim=4,
-        latent_dim=args["latent_dim"],
-        num_heads=args["num_heads"],
-        num_layers=args["num_layers"],
-        device=device,
-        dropout=args["dropout"],
-        history_length=args["history_length"],
-        prediction_length=args["prediction_length"],
-        compressed_history_length=42,
-        current_dim=4,
-        fusion_hidden_dim=args["fusion_hidden_dim"],
-        nominal_state_dim=5,
-        nominal_transition_dim=4,
-        query_hidden_dim=args["query_hidden_dim"],
-    ).to(device)
-    model.load_state_dict(checkpoint["model_state_dict"])
-    return model.eval()
-
-
 def make_inputs(checkpoint: dict, batch_size: int, seed: int):
     args = checkpoint["args"]
     generator = np.random.default_rng(seed)
@@ -235,9 +84,10 @@ def make_inputs(checkpoint: dict, batch_size: int, seed: int):
     history_one = np.zeros(
         (1, args["history_length"], 7), dtype=np.float32
     )
-    history_one[:, :, 5] = 0.02
-    history_one[:, :, 6] = 0.0
-    history = np.repeat(history_one, batch_size, axis=0)
+    history_one[:, :, 0] = 16.0 * 0.05
+    history = history_one
+    initial_state = np.array([[0.0, 0.0, 0.0, 16.0, 0.0]], dtype=np.float32)
+    current_action = np.array([[0.0, 0.0]], dtype=np.float32)
 
     action = np.empty(
         (batch_size, args["prediction_length"], 2), dtype=np.float32
@@ -248,34 +98,17 @@ def make_inputs(checkpoint: dict, batch_size: int, seed: int):
     action[:, :, 1] = generator.normal(
         loc=0.0, scale=0.35, size=action[:, :, 1].shape
     )
-    return np.ascontiguousarray(history), np.ascontiguousarray(action)
+    return (
+        np.ascontiguousarray(history),
+        initial_state,
+        current_action,
+        np.ascontiguousarray(action),
+    )
 
 
 def export_onnx(wrapper, checkpoint, onnx_path: Path, opset: int, seed: int):
-    history, action = make_inputs(checkpoint, batch_size=2, seed=seed)
-    device = next(wrapper.parameters()).device
-    onnx_path.parent.mkdir(parents=True, exist_ok=True)
-    with torch.no_grad():
-        torch.onnx.export(
-            wrapper,
-            (
-                torch.from_numpy(history).to(device),
-                torch.from_numpy(action).to(device),
-            ),
-            str(onnx_path),
-            export_params=True,
-            opset_version=opset,
-            do_constant_folding=True,
-            input_names=("history", "future_action"),
-            output_names=("trajectory",),
-            dynamic_axes={
-                "history": {0: "batch"},
-                "future_action": {0: "batch"},
-                "trajectory": {0: "batch"},
-            },
-        )
-    model = onnx.load(str(onnx_path))
-    onnx.checker.check_model(model)
+    del checkpoint, seed
+    export_query_onnx(wrapper, onnx_path, opset=opset, candidate_batch=2)
 
 
 def create_session(onnx_path: Path, provider: str):
@@ -298,9 +131,15 @@ def create_session(onnx_path: Path, provider: str):
     return session
 
 
-def run(session, history, action):
+def run(session, history, initial_state, current_action, action):
     return session.run(
-        None, {"history": history, "future_action": action}
+        None,
+        {
+            "history": history,
+            "initial_state": initial_state,
+            "current_action": current_action,
+            "future_action": action,
+        },
     )[0]
 
 
@@ -334,13 +173,23 @@ def parse_strategies(value):
     return strategies, totals.pop()
 
 
-def timed_strategy(session, history, action, batch_size, call_count):
+def timed_strategy(
+    session, history, initial_state, current_action, action, batch_size, call_count
+):
     start = time.perf_counter_ns()
     outputs = []
     for call_index in range(call_count):
         begin = call_index * batch_size
         end = begin + batch_size
-        outputs.append(run(session, history[begin:end], action[begin:end]))
+        outputs.append(
+            run(
+                session,
+                history,
+                initial_state,
+                current_action,
+                action[begin:end],
+            )
+        )
     elapsed_ms = (time.perf_counter_ns() - start) / 1e6
     return elapsed_ms, outputs
 
@@ -379,15 +228,12 @@ def main():
         if args.onnx_path is not None
         else args.output_dir / "anycar_query_full_dynamic.onnx"
     )
-    if not torch.cuda.is_available():
-        raise RuntimeError(
-            "The current model implementation uses CUDA in its history encoder; "
-            "CUDA is required for export and PyTorch/ONNX validation."
-        )
-    export_device = torch.device("cuda")
-    wrapper = AnyCarQueryDeploymentWrapper(
-        build_model(checkpoint, export_device), checkpoint
-    ).to(export_device).eval()
+    export_device = torch.device(
+        "cuda" if torch.cuda.is_available() else "cpu"
+    )
+    wrapper = QueryDeploymentModel.from_checkpoint(
+        checkpoint_path, export_device
+    )
     if not args.skip_export:
         print(f"Exporting dynamic-batch ONNX: {onnx_path}")
         export_onnx(wrapper, checkpoint, onnx_path, args.opset, args.seed)
@@ -395,7 +241,7 @@ def main():
         raise FileNotFoundError(onnx_path)
 
     session = create_session(onnx_path, args.provider)
-    history, action = make_inputs(
+    history, initial_state, current_action, action = make_inputs(
         checkpoint, batch_size=total_candidates, seed=args.seed
     )
 
@@ -403,13 +249,13 @@ def main():
     validation_batch_size = min(total_candidates, 100)
     with torch.no_grad():
         torch_output = wrapper(
-            torch.from_numpy(history[:validation_batch_size]).to(export_device),
+            torch.from_numpy(history).to(export_device),
+            torch.from_numpy(initial_state).to(export_device),
+            torch.from_numpy(current_action).to(export_device),
             torch.from_numpy(action[:validation_batch_size]).to(export_device),
         ).cpu().numpy()
     onnx_output = run(
-        session,
-        history[:validation_batch_size],
-        action[:validation_batch_size],
+        session, history, initial_state, current_action, action[:validation_batch_size]
     )
     abs_diff = np.abs(torch_output - onnx_output)
 
@@ -418,6 +264,8 @@ def main():
             timed_strategy(
                 session,
                 history,
+                initial_state,
+                current_action,
                 action,
                 strategy["batch_size"],
                 strategy["call_count"],
@@ -433,6 +281,8 @@ def main():
             elapsed, outputs = timed_strategy(
                 session,
                 history,
+                initial_state,
+                current_action,
                 action,
                 strategy["batch_size"],
                 strategy["call_count"],

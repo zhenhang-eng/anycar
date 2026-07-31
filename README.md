@@ -82,6 +82,10 @@ ros2 launch foxglove_bridge foxglove_bridge_launch.xml
 XLA_PYTHON_CLIENT_MEM_FRACTION=0.3 ros2 launch car_ros2 car_sim.launch.py
 ```
 
+The default rollout backend is PyTorch Query. For the analytic DBM comparison
+with the same PyTorch MPPI configuration, append `mppi_backend:=dbm`; use
+`mppi_backend:=onnx` for the exported ONNX Query graph.
+
 3. Check the visualization in Foxglove Studio `localhost:8765`
 
 Expected to see:

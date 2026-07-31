@@ -72,64 +72,6 @@ class DynamicParams:
         }
         
 
-from nuplan.common.actor_state.ego_state import EgoState
-from nuplan.common.actor_state.vehicle_parameters import get_vehicle_parameters
-from nuplan.planning.simulation.controller.motion_model.bobtail_trailer_model import BobtailTrailerModel
-from nuplan.common.actor_state.car_footprint import CarFootprint
-from nuplan.common.actor_state.dynamic_car_state import DynamicCarState
-class NuPlanDynModel:
-    
-    def __init__(
-        self
-    ):
-        # use params from pdb
-        self.VEHICLE = get_vehicle_parameters()
-        self.model = BobtailTrailerModel(self.VEHICLE)
-        
-    def step_gym(self, state: CarState, action: CarAction):
-        
-        
-        
-        ego_state = EgoState(
-        car_footprint,
-        dynamic_car_state,
-        tire_steering_angle=motion_model.get_max_steering_angle() - 1e-4,
-        is_in_auto_mode=True,
-        time_point=TimePoint(0),
-    )
-        
-        batch_x = jnp.array(state.x)
-        batch_y = jnp.array(state.y)
-        batch_psi = jnp.array(state.psi)
-        batch_vx = jnp.array(state.vx)
-        batch_vy = jnp.array(state.vy)
-        batch_omega = jnp.array(state.omega)
-        
-        batch_target_vel = jnp.array(action.target_vel)
-        batch_target_steer = jnp.array(action.target_steer)
-
-        next_x, next_y, next_psi, next_vx, next_vy, next_omega = self.step(
-            batch_x,
-            batch_y,
-            batch_psi,
-            batch_vx,
-            batch_vy,
-            batch_omega,
-            batch_target_vel,
-            batch_target_steer,
-            self.batch_LF, self.batch_LR, self.batch_MASS, self.batch_DT, self.batch_K_RFY, self.batch_K_FFY, self.batch_Iz, self.batch_Ta, self.batch_Tb, self.batch_Sa, self.batch_Sb, self.batch_mu, self.batch_Cf, self.batch_Cr, self.batch_Bf, self.batch_Br, self.batch_hcom, self.batch_fr,
-        )
-        return CarState(
-            x=next_x[0],
-            y=next_y[0],
-            psi = next_psi[0],
-            vx = next_vx[0],
-            vy = next_vy[0],
-            omega = next_omega[0],
-        )
-    
-    pass
-
 class DynamicBicycleModel:
     def __init__(self, params: DynamicParams,) -> None:
         self.params = params
