@@ -371,6 +371,132 @@ outputs/mppi_sampling_snapshot/adaptive_guided_dbm_step0340/
 python scripts/model_verify/adaptive_guided_mppi_sampling.py
 ```
 
+## Query 模型上的相同串行优化
+
+为避免把不同闭环轨迹上的“第 340 步”混在一起，本实验不使用
+`live_query_clean_step0340` 的另一车辆状态，而是固定使用 DBM clean step 340 的
+state、250 帧 history、reference、warm-start 和 MPPI cost，仅将 rollout backend
+替换为 small-car Query PyTorch checkpoint：
+
+```text
+outputs/formal_small_car_query_dt005/20260730T144840/query_best.pt
+dt=0.05, wheelbase=0.21 m
+```
+
+控制参数化仍为 8 个时间 knot / 16 个标量变量，每种策略严格使用 256 条 Query
+rollout。经验响应和自适应方案只读取 forward trajectory，不使用 Query gradient。
+原 DBM 快照保存的 256 条动作也全部在 Query 下重新预测：Query 最优 cost 为
+`8.005599`，P10 为 `51.945045`；不能直接沿用它们原来的 DBM cost。
+
+为与 DBM 的固定 1/2/3/4 轮结果逐面板对照，另存了完全相同六面板口径的 Query
+图：累计最优、主种子最终解、10 种子均值方差、末轮分布与 ESS、有效候选数、
+加权输出轨迹。图中 Gaussian baseline 也已经用 Query 重算，而不是沿用 DBM cost：
+
+```text
+outputs/mppi_sampling_snapshot/query_guided_on_dbm_state_step0340/
+  query_stage_count_comparison_matched.png
+  query_stage_count_comparison_matched.svg
+```
+
+主种子 `3407`：
+
+| 策略 | Query best | Query 加权输出 | Query 累计 P10 | 同一加权动作的 DBM cost |
+|---|---:|---:|---:|---:|
+| 固定 1 轮 `[256]` | 11.297912 | 16.451288 | 46.800049 | 25.843805 |
+| 固定 2 轮 `[128,128]` | 2.691007 | 2.708265 | 3.855164 | 49.316887 |
+| 固定 3 轮 `[86,86,84]` | 2.345204 | 2.184292 | **3.212370** | 31.041899 |
+| 固定 4 轮 `[64,64,64,64]` | **2.128765** | 2.137594 | 3.354422 | **11.631778** |
+| Query 自适应 `[96,80,40,40]` | 2.273432 | **2.136242** | 4.447206 | 27.386366 |
+
+### 固定 4 轮的逐轮作用
+
+主种子固定 4 轮每轮使用 64 条候选。`center cost` 是该轮第一个、由上一轮经验
+响应给出的中心；`DBM replay` 使用该轮 Query-best 的完整动作序列：
+
+| 轮次 | sigma 比例 | center cost | Query best | Query P10 | median | 拟合相对误差 | DBM replay |
+|---:|---:|---:|---:|---:|---:|---:|---:|
+| S1 | 1.000 | 11.898425 | 11.297935 | 25.136974 | 186.978271 | 0.466527 | 26.817827 |
+| S2 | 0.464 | 5.615562 | 4.818554 | 13.843401 | 51.103943 | 0.480936 | **4.012443** |
+| S3 | 0.215 | 6.193681 | 2.597015 | 4.783725 | 13.723690 | 0.138327 | 7.780776 |
+| S4 | 0.100 | 2.128765 | **2.128765** | **2.528807** | **4.530265** | 不适用 | 11.518799 |
+
+第一轮的直接随机搜索收益很小：center `11.898` 只改善到 best `11.298`，且 64
+条候选的 median 高达 `186.98`。它的主要作用不是直接找到好动作，而是利用整批
+轨迹误差拟合响应；该信息把第二轮中心推到 `5.616`，第二轮找到的动作不仅 Query
+cost 降到 `4.819`，DBM replay 也同步降到 `4.012`，是本快照上真正有效的一次
+更新。
+
+第二轮之后开始分离：S3/S4 的 Query best 继续降到 `2.597/2.129`，但 DBM replay
+反而升到 `7.781/11.519`。因此在此固定状态上，以 DBM 真值为准的最佳停止点是
+S2；以 Query 内部目标为准则则会错误地继续优化到 S4。这个单状态结果不能直接
+固化为在线“两轮停止”规则，但清楚说明后续停止判据不能只使用 Query predicted
+cost。
+
+10 个种子在 Query 预测空间中的统计：
+
+| 策略 | Query best（mean ± std） | Query 加权输出（mean ± std） | 累计 P10 | 末轮 P10 |
+|---|---:|---:|---:|---:|
+| 固定 2 轮 | 2.682144 ± 0.231216 | 2.754611 ± 0.283151 | 4.074528 | 3.452582 |
+| 固定 3 轮 | 2.409297 ± 0.077897 | 2.342580 ± 0.088103 | **3.609961** | 2.822492 |
+| 固定 4 轮 | **2.234605 ± 0.061796** | **2.226319 ± 0.045674** | 3.746831 | 2.738627 |
+| Query 自适应 | 2.300297 ± 0.087944 | 2.256441 ± 0.104172 | 4.044850 | **2.533519** |
+
+DBM 上得到的自适应拟合误差阈值 `0.45` 直接迁移到 Query 后，平均 best/加权
+输出仅为 `2.359327/2.320250`。Query 第一轮经验响应拟合误差通常更高，主种子为
+`0.499`，因此将 Query 专用阈值放宽到 `0.55`；其余预算、sigma 和信赖域规则不
+变。校准后所有种子都选择 `[96,80,40,40]`。相对固定 3 轮，自适应在 best、加权
+输出和末轮 P10 上分别赢 `9/10`、`9/10` 和 `9/10`；相对固定 4 轮则为 `3/10`、
+`5/10` 和 `9/10`。所以自适应能让最后一批候选更集中，但没有超过固定 4 轮的
+最终解质量。
+
+### DBM 真值复算
+
+每个种子的 Query-best 动作和 Query 加权动作又在相同初始侧向速度的 DBM 下做了
+额外诊断 rollout；这些 rollout 不计入 256 条 Query 优化预算：
+
+| 策略 | DBM cost：Query-best 动作（mean ± std） | DBM cost：Query 加权动作（mean ± std） |
+|---|---:|---:|
+| 固定 2 轮 | 35.842656 ± 19.835004 | 44.998713 ± 23.702189 |
+| 固定 3 轮 | 24.019851 ± 16.905145 | 24.864700 ± 16.828289 |
+| 固定 4 轮 | **13.684627 ± 9.601863** | **13.909435 ± 9.743364** |
+| Query 自适应 | 19.079573 ± 10.480639 | 20.592750 ± 11.529078 |
+
+同一快照原始 DBM 256 候选的最优 cost 是 `5.085486`，而 Query 内部降到约
+`2.2` 的动作在 DBM 下仍明显更差。综合图中的 Query 预测轨迹贴近 reference，
+但相同动作的 DBM replay 明显偏离。这说明多轮优化正在利用 Query 的长时域模型
+误差：**Query predicted cost 继续下降并不代表仿真真值或实车性能继续改善**。
+
+当前结论：
+
+- 只看 Query 内部目标，固定 4 轮优于固定 2/3 轮和自适应；
+- 自适应方案主要改善末轮 P10，不值得替代固定 4 轮；
+- 由于 DBM cross-evaluation 显著恶化，当前不应把 Query 多轮串行引导接入在线
+  MPPI；
+- 若继续，应优先限制 proposal 偏离、加入 DBM/混合模型验证或多模型一致性约束，
+  并扩展到多个固定状态，而不是继续针对 Query predicted cost 调采样阈值。
+
+实验输出：
+
+```text
+outputs/mppi_sampling_snapshot/query_guided_on_dbm_state_step0340/
+  summary.json
+  primary_results.npz
+  per_seed_metrics.csv
+  query_guided_comparison.png
+  query_guided_comparison.svg
+  query_fixed4_stage_progression.csv
+  query_fixed4_stage_progression.png
+  query_fixed4_stage_progression.svg
+```
+
+复现：
+
+```bash
+python scripts/model_verify/compare_query_guided_mppi.py
+python scripts/model_verify/plot_query_fixed4_stage_progression.py
+python scripts/model_verify/plot_query_stage_count_comparison.py
+```
+
 ## 复算和新采样器接口
 
 复算快照内的原始候选：
