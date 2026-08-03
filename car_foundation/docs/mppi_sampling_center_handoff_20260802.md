@@ -5,8 +5,7 @@
 ## 接续入口
 
 后续恢复本任务时，先读本文，然后按“下一项实现任务”继续。当前没有训练或 ROS
-采集进程在运行；T0 teacher sidecar 已生成并验证，尚未开始 T1 高预算 teacher 和
-策略网络训练。
+采集进程在运行；T0/T1 teacher sidecar 已生成并验证，尚未开始策略网络训练。
 
 项目目标是让轻量策略网络根据状态、250 步 history、reference 和 MPPI warm start，
 预测 8×2 knots 的 sampling-center 修正，再由 MPPI 在新中心附近采样。网络不直接
@@ -125,10 +124,15 @@ temperature 为 1.0，yaw-rate 权重为 0。保存的未加权逐步 features �
   复算 T0 标签；
 - `scripts/model_verify/dbm_teacher_cost_configs_20260803_v1.json`：当前 teacher cost
   配置，第一项严格复现 collection objective。
+- `scripts/model_verify/generate_dbm_multicenter_teacher.py`：T1 多起点、多轮 CEM 和
+  common-random-number proposal 评估；
+- `scripts/model_verify/validate_dbm_multicenter_teacher.py`：独立复算 T1 cost、分布指标、
+  selection score 和 teacher argmin；
+- `scripts/model_verify/dbm_teacher_t1_config_20260803_v1.json`：冻结 T1 搜索、selection、
+  audit seed 和 score 权重。
 
 尚未实现：
 
-- T1 高预算/多中心 DBM teacher rollout；
 - proposal policy/critic 网络；
 - BC/bandit 训练脚本；
 - 离线 proposal evaluator；
@@ -137,12 +141,13 @@ temperature 为 1.0，yaw-rate 权重为 0。保存的未加权逐步 features �
 
 ## 下一项实现任务
 
-T0 **DBM teacher/relabel pipeline** 已完成，先不要接 Query、PPO、ONNX 或 ROS 在线
-策略。正式标签位于：
+T0/T1 **DBM teacher pipeline** 已完成，下一项是 T2 dataset loader、bounded residual
+policy、BC 训练和 held-out DBM proposal evaluator。先不要接 Query、TD3/SAC、PPO、
+ONNX 或 ROS 在线策略。正式 T1 标签位于：
 
 ```text
 /disk/collect_data_from_anycar/mppi_rl_closed_loop/labels/
-dbm_teacher_t0_20260803_v1
+dbm_teacher_t1_20260803_v1
 ```
 
 建议分两步：
@@ -165,25 +170,38 @@ soft-center cost。96 帧已全部通过 validator：warm candidate 为 best 的
 平均 ESS 1.543，best candidate clipping 比例 20.8%。详细结果见
 [teacher 标签方案与实现状态](mppi_teacher_label_plan_20260803.md)。
 
-### T1：生成高预算/多中心 DBM teacher（下一项）
+### T1：生成高预算/多中心 DBM teacher（已完成）
 
 T0 验证通过后，从 snapshot 恢复 state/history/reference/warm knots，用高预算 DBM
 或多中心 bank 搜索更可靠的 teacher。teacher 预算、center bank 和 cost 配置必须进入
 manifest。若最优候选频繁落在 T0 bank 边界，不能把 T0 best 当最终 teacher。
 
-当前 T0 sidecar 布局：
+当前实现每帧从 warm/T0-best/T0-soft 做 2 seeds × 3 stages × 128 CEM search，shortlist
+8 个中心后以 3 seeds × 256 rollout 选择 teacher，并以另外 3 个 seed 做 warm/teacher
+audit。全量 96 帧 audit weighted-output cost 均改善，平均降低 5.897；P10 在 86/96 帧
+改善。详细预算、score 和限制见
+[teacher 标签方案与实现状态](mppi_teacher_label_plan_20260803.md)。
+
+当前 T1 sidecar 布局：
 
 ```text
 /disk/collect_data_from_anycar/mppi_rl_closed_loop/labels/
-  dbm_teacher_t0_20260803_v1/
+  dbm_teacher_t1_20260803_v1/
     manifest.json
     splits.json
-    cost_configs.json
+    teacher_config.json
     labels.csv
     episode_000/step_000250.npz
 ```
 
 原 collection 中的 `.npz`、manifest 和 trace 不得修改。
+
+### T2：BC 和离线 proposal 验证（下一项）
+
+第一版只读取 T1 的 `teacher_delta_knots`，实现 episode split dataset、输入归一化、轻量
+MLP/temporal encoder 和 `[8,2]` bounded residual head。先检查网络能否拟合 teacher，
+再用新 DBM seed 对 warm/network/teacher 做相同 256-rollout proposal 评估。必须同时
+报告 weighted-output cost、P10、clipping、中心偏移和推理延迟。
 
 ## 随后的策略网络验证
 
@@ -221,8 +239,8 @@ fixed_dbm_train_seed_20260802_v2/episode_000
 最近一次状态：`car_dynamics` 和 `car_ros2` colcon 构建通过；8 个 schema-v2 episode
 及 3 个旧 pilot 全部通过 validator，共 120 个 snapshot、30,720 条 candidate
 rollout；场景表与 manifest 的 initial state/MPPI seed 一致；AnyCar skill 结构校验
-通过；T0 正式 sidecar 的 96 个 snapshot/label 均通过独立 validator；没有残留 ROS
-采集进程。
+通过；T0/T1 正式 sidecar 的 96 个 snapshot/label 均通过独立 validator；T1 的独立
+audit seeds 上 96/96 帧 weighted-output cost 改善；没有残留 ROS 采集进程。
 
 本批 schema-v2 采集实现、validator、场景表和文档已随本文整理提交。恢复时仍应先
 运行 `git status --short`，保留用户后续产生的修改。正式 episode 是在 dirty 工作树

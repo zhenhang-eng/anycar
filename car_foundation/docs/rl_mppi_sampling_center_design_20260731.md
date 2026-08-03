@@ -863,15 +863,18 @@ T0/T1 teacher 的标签定义、计划和当前结果见
 - T0 teacher sidecar 已实现并在 96 帧上通过 source hash、cost/weight 和 label 独立复算；
 - T0 平均 ESS 1.543，44/96 帧 warm 已是 best，20.8% 的 best candidate 发生 clipping，
   因而只作为 pipeline/初版 BC 标签，不能视作最终 teacher；
-- T1 高预算/多中心 DBM teacher、reward sidecar、BC、critic 和策略闭环 A/B 尚未实现；
-- 下一步不再盲目扩数据，先做 T1，并根据 bank 边界率和策略闭环分布偏移定向扩充。
+- T1 高预算/多中心 DBM teacher 已在 96 帧上完成；未参与选择的 audit seeds 上
+  weighted-output cost 96/96 改善，平均降低 5.897，P10 在 86/96 帧改善；
+- T1 teacher 的标准化 center delta RMS 均值 0.436，中心 boundary fraction 为 0；
+- reward sidecar、BC、critic 和策略闭环 A/B 尚未实现；
+- 下一步先做 T2 BC 和 held-out DBM proposal evaluator，再根据失败状态定向扩充。
 
 ## 20. 当前推荐结论
 
 推荐从以下最小方案开始：
 
-> 已复用现有 DBM candidates 打通可配置 cost-weight/temperature 的 T0 标签 sidecar；
-> 下一步使用 DBM 高预算/多中心 teacher 生成跨状态监督目标，训练输出 16 维 bounded
+> 已完成 T0 relabel 和 T1 DBM 高预算/多中心 teacher；下一步使用 T1 跨状态监督目标，
+> 训练输出 16 维 bounded
 > center residual 的轻量网络；随后在 DBM 上完成单步 contextual-bandit 和严格闭环
 > A/B。DBM 阶段通过后才切换 Query 重新 rollout/relabel。
 

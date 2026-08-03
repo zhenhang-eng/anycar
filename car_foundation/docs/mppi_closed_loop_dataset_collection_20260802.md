@@ -176,9 +176,11 @@ weight、regret、ESS 和 clipping 诊断，并保存 source SHA256。原 collec
 
 下一步：
 
-1. 使用固定 DBM 做高预算/多中心 T1 teacher，真正 rollout 新 proposal center。
-2. 根据曲率、速度、误差和 warm-start cost 分桶检查 v2 seed 覆盖度。
-3. 用 T1 teacher 做初版 BC 和 held-out DBM proposal 评估。
+1. T1 高预算/多中心 DBM teacher 已完成，正式 sidecar 为
+   `labels/dbm_teacher_t1_20260803_v1`；独立 audit seeds 上 96/96 帧 weighted-output
+   cost 改善。
+2. 实现 T1 dataset loader、初版 BC 和 held-out DBM proposal 评估。
+3. 根据曲率、速度、误差和 warm-start cost 分桶检查 v2 seed 覆盖度。
 4. 追加速度/外扰/恢复边界和不同动力学参数的独立 collection，不混入固定 DBM split。
 5. 再扩展多 cost 权重/temperature、reward sidecar 和 TD3/SAC 训练。
 

@@ -47,7 +47,7 @@ q_i=\frac{\exp(-(C_i-C_{min})/\lambda)}
 `soft_weighted_candidate_cost=\sum_iq_iC_i` 只是已有候选 cost 的期望，不能当作 soft
 center 自身的 DBM cost。
 
-### T1：高预算/多中心 DBM teacher（下一项）
+### T1：高预算/多中心 DBM teacher（已实现）
 
 从每个 snapshot 恢复 state/history/reference/warm knots，围绕 warm、T0 best、T0 soft
 以及多尺度扰动中心生成 center bank，再使用固定 DBM rollout。至少记录：
@@ -140,3 +140,68 @@ temperature=1 下权重常被极少数候选支配；44 帧 warm 已 best，说�
 不少状态没有找到更好方向；20.8% 的 best clipping 也提示部分 optimum 可能贴近当前
 bank/action 边界。因此 T0 适合训练管线、critic 和初版 BC，不应被称为最终 teacher 或
 性能上限；下一项应做 T1 高预算/多中心 DBM rollout。
+
+## 5. T1 实现与预算
+
+代码与配置：
+
+```text
+scripts/model_verify/dbm_teacher_t1_config_20260803_v1.json
+scripts/model_verify/generate_dbm_multicenter_teacher.py
+scripts/model_verify/validate_dbm_multicenter_teacher.py
+```
+
+正式 sidecar：
+
+```text
+/disk/collect_data_from_anycar/mppi_rl_closed_loop/labels/
+dbm_teacher_t1_20260803_v1
+```
+
+每个状态的搜索过程：
+
+1. 从 `warm`、`T0 best`、`T0 soft` 三个中心分别启动；
+2. 使用两个 search seed，每个起点执行三轮 CEM，sigma scale 为
+   `1.0 / 0.4 / 0.15`，每轮 128 条 antithetic candidates；
+3. 将 21 个初始/搜索中心用 DBM 计算 direct cost，保留三个初始中心和 direct cost
+   最低的中心，共 8 个 shortlist centers；
+4. 对 8 个中心使用三个相同的 selection seeds，每个 seed 采样 256 条，重新 rollout
+   MPPI weighted output；
+5. 以 weighted-output cost mean 为主，辅以其标准差、P10、soft-min、标准化 center
+   shift 和 boundary fraction 组成显式 selection score；warm 始终在 shortlist 中；
+6. 再使用三个与 selection 完全不重合的 audit seeds，只比较 warm 和 teacher，不参与
+   标签选择。
+
+每帧包含 2,304 条 CEM search rollout、6,144 条 shortlist proposal probe、1,536 条
+独立 audit probe，以及少量 center/weighted-output direct rollout。全量 96 帧耗时
+`418.65 s`，sidecar 约 `12 MiB`。
+
+T1 保存 center bank、shortlist、每个 probe 的 cost/weight、P10/soft-min/ESS/clipping、
+weighted-output action/trajectory/cost、selection score、teacher center/delta、source/T0
+hash 和全部 seed/config。validator 从保存的动作、轨迹和 reference 独立复算 direct 与
+weighted-output cost、候选分布指标、score 和 teacher argmin。
+
+## 6. T1 全量结果
+
+96 帧全部通过 validator。使用不参与选择的 audit seeds：
+
+- warm weighted-output cost 均值 `13.210`，teacher 为 `7.313`；
+- 96/96 帧 weighted-output cost 改善；平均降低 `5.897`，中位数降低 `5.029`，平均
+  相对降低约 `43.6%`；
+- P10 在 86/96 帧改善，平均降低 `5.392`；
+- train/validation/test 的 weighted-output cost 平均分别降低
+  `5.573 / 7.367 / 6.371`，三个 split 均未出现 weighted-output 退化；
+- teacher 相对 warm 的标准化 delta RMS 均值 `0.436`、中位数 `0.318`、最大 `1.105`；
+- teacher 中心本身的 boundary fraction 为 0；proposal candidate element clipping
+  fraction 从 warm 的 `4.54%` 降至 teacher 的 `4.37%`；
+- 最终中心的搜索起点来源：T0 soft 48 帧、T0 best 29 帧、warm 19 帧；没有直接回退到
+  未优化 warm 的帧。
+
+ESS 从 warm 的平均 `1.376` 降至 teacher 的 `1.123`，表示 temperature=1 下 teacher
+周围仍由少数低 cost 候选主导。它不否定 weighted output 的改善，但说明后续 BC/RL
+不能把“ESS 更大”单独当成质量目标，且仍需用新 seed 和闭环验证稳定性。
+
+当前结论是：T1 已提供比 T0 更适合作为第一版 BC 监督目标的 `teacher_delta_knots`，
+但它仍是固定 DBM、单赛道、96 个状态和有限 center bank 下的近似 teacher，不是全局
+最优。下一项进入 T2：实现 dataset loader、轻量 bounded-residual policy、BC 训练和
+held-out DBM proposal evaluator；暂不开始 TD3/SAC。
