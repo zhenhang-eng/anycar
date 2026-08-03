@@ -1,8 +1,10 @@
 from copy import deepcopy
 from dataclasses import asdict, dataclass
 import csv
+import hashlib
 import json
 from pathlib import Path as FilePath
+import subprocess
 import torch
 from termcolor import colored
 import rclpy
@@ -47,7 +49,7 @@ import threading
 from multiprocessing.pool import ThreadPool
 
 
-unique_prefix = datetime.datetime.now().isoformat(timespec='milliseconds')
+unique_prefix = datetime.datetime.now().strftime("%Y%m%dT%H%M%S_%f")[:-3]
 
 SPEED = 1.
 SAFE_SPEED_MAX = 10.0
@@ -124,6 +126,38 @@ class CarNode(Node):
                 self.declare_parameter("mppi_snapshot_dir", "").value
             )
             self.mppi_snapshot_written = False
+            self.mppi_dataset_dir = str(
+                self.declare_parameter("mppi_dataset_dir", "").value
+            )
+            self.mppi_dataset_start_step = int(
+                self.declare_parameter("mppi_dataset_start_step", -1).value
+            )
+            self.mppi_dataset_stop_step = int(
+                self.declare_parameter("mppi_dataset_stop_step", -1).value
+            )
+            self.mppi_dataset_stride = int(
+                self.declare_parameter("mppi_dataset_stride", 10).value
+            )
+            self.mppi_dataset_max_snapshots = int(
+                self.declare_parameter("mppi_dataset_max_snapshots", 0).value
+            )
+            self.mppi_dataset_shutdown_on_complete = bool(
+                self.declare_parameter(
+                    "mppi_dataset_shutdown_on_complete", False
+                ).value
+            )
+            requested_episode_id = str(
+                self.declare_parameter("mppi_dataset_episode_id", "").value
+            ).strip()
+            self.mppi_dataset_episode_id = requested_episode_id or unique_prefix
+            if self.mppi_dataset_stride < 1:
+                raise ValueError("mppi_dataset_stride must be positive")
+            if self.mppi_dataset_max_snapshots < 0:
+                raise ValueError("mppi_dataset_max_snapshots cannot be negative")
+            self.mppi_dataset_snapshot_count = 0
+            self.mppi_dataset_records = []
+            self.mppi_dataset_shutdown_requested = False
+            self.simulator_metadata = None
             self.mppi_backend_name = backend_name
             self.query_checkpoint_path = checkpoint_path
             num_samples = int(
@@ -131,6 +165,9 @@ class CarNode(Node):
             )
             num_iterations = int(
                 self.declare_parameter("mppi_num_iterations", 1).value
+            )
+            mppi_seed = int(
+                self.declare_parameter("mppi_seed", 3407).value
             )
             device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
             if backend_name == "pytorch":
@@ -172,9 +209,15 @@ class CarNode(Node):
                     "mppi_backend must be 'pytorch', 'onnx', or 'dbm', "
                     f"got {backend_name!r}"
                 )
+            if self.mppi_dataset_dir and backend_name != "dbm":
+                raise ValueError(
+                    "Closed-loop MPPI dataset collection currently requires "
+                    "mppi_backend=dbm so six-state trajectories are available"
+                )
             self.mppi_params = TorchMPPIParams(
                 num_samples=num_samples,
                 num_iterations=num_iterations,
+                seed=mppi_seed,
             )
             if abs(self.control_dt - self.mppi_params.dt) > 1e-9:
                 raise ValueError(
@@ -227,6 +270,7 @@ class CarNode(Node):
         # track = generate_oval_trajectory((0., -20.0), 20.0, 20.0, direction=-1)
         self.track_path = os.path.join(CAR_PLANNER_ASSETS_DIR, "cuc_inside.csv")
         track = np.loadtxt(self.track_path, delimiter=',', skiprows=1)
+        self.track_array = np.asarray(track, dtype=np.float32)
 
         self.global_planner = GlobalTrajectory(track)
         self.step_mode_ = self.declare_parameter('step_mode', False).value
@@ -251,6 +295,12 @@ class CarNode(Node):
         self.loss_pub_ = self.create_publisher(Float64, 'adapt/loss', 1)
         self.misc_pub_ = self.create_publisher(String, 'misc_message', 1)
         self.mppi_time_pub_ = self.create_publisher(Float64, 'mppi_time', 1)
+        self.simulator_metadata_sub_ = self.create_subscription(
+            String,
+            "simulator_metadata",
+            self.simulator_metadata_callback,
+            1,
+        )
         if TELEOP:
             self.joy_sub = self.create_subscription(Joy, 'joy', self.joy_callback, 1)
             self.joy = None
@@ -290,6 +340,316 @@ class CarNode(Node):
         while True:
             self.timer_callback()
 
+    def simulator_metadata_callback(self, msg):
+        try:
+            self.simulator_metadata = json.loads(msg.data)
+        except json.JSONDecodeError as exc:
+            self.get_logger().warn(f"Invalid simulator metadata JSON: {exc}")
+
+    def _dataset_snapshot_due(self):
+        if not self.mppi_dataset_dir:
+            return False
+        start_step = max(0, self.mppi_dataset_start_step)
+        if self._counter < start_step:
+            return False
+        if (
+            self.mppi_dataset_stop_step >= 0
+            and self._counter > self.mppi_dataset_stop_step
+        ):
+            return False
+        if (self._counter - start_step) % self.mppi_dataset_stride != 0:
+            return False
+        return not (
+            self.mppi_dataset_max_snapshots
+            and self.mppi_dataset_snapshot_count
+            >= self.mppi_dataset_max_snapshots
+        )
+
+    def _dataset_collection_complete(self):
+        return bool(
+            self.mppi_dataset_dir
+            and self.mppi_dataset_max_snapshots
+            and self.mppi_dataset_snapshot_count
+            >= self.mppi_dataset_max_snapshots
+        )
+
+    @staticmethod
+    def _shutdown_after_dataset_callback():
+        # rclpy.shutdown() waits for active executor callbacks. Calling it from
+        # the odometry callback itself deadlocks, so let that callback return.
+        time.sleep(0.05)
+        if rclpy.ok():
+            rclpy.shutdown()
+
+    def _dataset_trace_due(self):
+        if not self.mppi_dataset_dir or self._dataset_collection_complete():
+            return False
+        return not (
+            self.mppi_dataset_stop_step >= 0
+            and self._counter > self.mppi_dataset_stop_step
+        )
+
+    def _snapshot_targets(self):
+        targets = []
+        if (
+            not self.mppi_snapshot_written
+            and self.mppi_snapshot_step == self._counter
+            and bool(self.mppi_snapshot_dir)
+        ):
+            output_dir = FilePath(self.mppi_snapshot_dir).expanduser().resolve()
+            targets.append(
+                {
+                    "mode": "legacy-single",
+                    "snapshot": output_dir / "snapshot.npz",
+                    "summary": output_dir / "summary.json",
+                    "candidate_csv": output_dir / "candidate_costs.csv",
+                }
+            )
+        if self._dataset_snapshot_due():
+            episode_root = (
+                FilePath(self.mppi_dataset_dir).expanduser().resolve()
+                / self.mppi_dataset_episode_id
+            )
+            if (
+                not self.mppi_dataset_records
+                and episode_root.exists()
+                and any(
+                    path.name != "closed_loop_trace.jsonl"
+                    for path in episode_root.iterdir()
+                )
+            ):
+                raise FileExistsError(
+                    f"Refusing to overwrite existing dataset episode: {episode_root}"
+                )
+            stem = f"step_{self._counter:06d}"
+            targets.append(
+                {
+                    "mode": "closed-loop-dataset",
+                    "episode_root": episode_root,
+                    "snapshot": episode_root / "snapshots" / f"{stem}.npz",
+                    "summary": episode_root / "snapshots" / f"{stem}.json",
+                    "candidate_csv": None,
+                }
+            )
+        return targets
+
+    @staticmethod
+    def _reference_in_ego_frame(reference, full_state):
+        local_reference = np.asarray(reference, dtype=np.float32).copy()
+        delta = local_reference[:, :2] - np.asarray(full_state[:2])
+        yaw = float(full_state[2])
+        cosine = np.cos(yaw)
+        sine = np.sin(yaw)
+        local_reference[:, 0] = cosine * delta[:, 0] + sine * delta[:, 1]
+        local_reference[:, 1] = -sine * delta[:, 0] + cosine * delta[:, 1]
+        yaw_delta = local_reference[:, 2] - yaw
+        local_reference[:, 2] = np.arctan2(
+            np.sin(yaw_delta), np.cos(yaw_delta)
+        )
+        return local_reference
+
+    @staticmethod
+    def _raw_cost_features(trajectory, action, reference, current_action):
+        cost_reference = np.asarray(reference, dtype=np.float32)
+        if len(cost_reference) == trajectory.shape[1] + 1:
+            cost_reference = cost_reference[1:]
+        if len(cost_reference) != trajectory.shape[1]:
+            raise ValueError("reference length does not match predicted trajectory")
+        position_error = trajectory[..., :2] - cost_reference[None, :, :2]
+        yaw_delta = trajectory[..., 2] - cost_reference[None, :, 2]
+        previous_action = np.concatenate(
+            (
+                np.broadcast_to(
+                    np.asarray(current_action, dtype=np.float32),
+                    (action.shape[0], 1, action.shape[2]),
+                ),
+                action[:, :-1],
+            ),
+            axis=1,
+        )
+        features = {
+            "feature_position_error_sq": np.square(position_error).sum(axis=-1),
+            "feature_yaw_error_sq": np.square(
+                np.arctan2(np.sin(yaw_delta), np.cos(yaw_delta))
+            ),
+            "feature_vx_error_sq": np.square(
+                trajectory[..., 3] - cost_reference[None, :, 3]
+            ),
+            "feature_action_rate_sq": np.square(action - previous_action),
+        }
+        if cost_reference.shape[1] >= 5:
+            features["feature_yawrate_error_sq"] = np.square(
+                trajectory[..., 4] - cost_reference[None, :, 4]
+            )
+        return features
+
+    @staticmethod
+    def _git_metadata(repository_root):
+        def run_git(*arguments):
+            result = subprocess.run(
+                ["git", "-C", repository_root, *arguments],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            return result.stdout.rstrip()
+
+        try:
+            status = run_git("status", "--porcelain")
+            return {
+                "commit": run_git("rev-parse", "HEAD"),
+                "branch": run_git("branch", "--show-current"),
+                "dirty": bool(status),
+                "dirty_files": status.splitlines(),
+            }
+        except (OSError, subprocess.CalledProcessError) as exc:
+            return {"error": str(exc)}
+
+    def _append_dataset_trace(
+        self,
+        control_step,
+        full_state,
+        current_action,
+        controller_action,
+        executed_action,
+        reference,
+        frenet_pose,
+        mean_knots_before,
+        running_state_after,
+        mppi_info,
+        duration_sec,
+    ):
+        episode_root = (
+            FilePath(self.mppi_dataset_dir).expanduser().resolve()
+            / self.mppi_dataset_episode_id
+        )
+        if control_step == 0 and episode_root.exists() and any(
+            episode_root.iterdir()
+        ):
+            raise FileExistsError(
+                f"Refusing to overwrite existing dataset episode: {episode_root}"
+            )
+        episode_root.mkdir(parents=True, exist_ok=True)
+        trace_path = episode_root / "closed_loop_trace.jsonl"
+        cost = mppi_info["cost"].cpu().numpy()
+        record = {
+            "control_step": int(control_step),
+            "simulated_time_s": float(control_step * self.control_dt),
+            "history_valid_steps": int(
+                min(control_step, self.mppi_params.history_length)
+            ),
+            "state": np.asarray(full_state).tolist(),
+            "current_action": np.asarray(current_action).tolist(),
+            "controller_action": np.asarray(controller_action).tolist(),
+            "executed_action": np.asarray(executed_action).tolist(),
+            "reference": np.asarray(reference).tolist(),
+            "frenet_pose": [
+                float(frenet_pose.s),
+                float(frenet_pose.t),
+                float(frenet_pose.xi),
+            ],
+            "mean_knots_before": mean_knots_before.cpu().numpy().tolist(),
+            "mean_knots_after": (
+                running_state_after.mean_knots.cpu().numpy().tolist()
+            ),
+            "optimized_action_sequence": (
+                mppi_info["optimized_action_sequence"].cpu().numpy().tolist()
+            ),
+            "cost_summary_at_collection": {
+                "best": float(cost.min()),
+                "mean": float(cost.mean()),
+                "median": float(np.median(cost)),
+                "p95": float(np.percentile(cost, 95)),
+                "effective_sample_size": float(
+                    mppi_info["effective_sample_size"].cpu()
+                ),
+            },
+            "controller_duration_s": float(duration_sec),
+        }
+        with trace_path.open("a") as stream:
+            stream.write(json.dumps(record, separators=(",", ":")) + "\n")
+
+    def _write_dataset_manifest(self, episode_root, snapshot_summary):
+        episode_root.mkdir(parents=True, exist_ok=True)
+        manifest_path = episode_root / "manifest.json"
+        repository_root = os.environ.get("CAR_PATH", "/home/plusai/anycar")
+        if not self.mppi_dataset_records:
+            if manifest_path.exists():
+                raise FileExistsError(
+                    f"Refusing to overwrite existing dataset episode: {episode_root}"
+                )
+            track_artifact = episode_root / "track.npz"
+            np.savez_compressed(
+                track_artifact,
+                source_track=self.track_array,
+                planner_waypoints=np.asarray(
+                    self.global_planner.waypoints.T, dtype=np.float32
+                ),
+            )
+            track_sha256 = hashlib.sha256(
+                FilePath(self.track_path).read_bytes()
+            ).hexdigest()
+            manifest = {
+                "format_version": 2,
+                "dataset_type": "anycar-mppi-closed-loop-snapshots",
+                "episode_id": self.mppi_dataset_episode_id,
+                "created_utc": datetime.datetime.now(
+                    datetime.timezone.utc
+                ).isoformat(),
+                "fixed_dbm_parameters": True,
+                "repository": self._git_metadata(repository_root),
+                "track": {
+                    "source_path": str(FilePath(self.track_path).resolve()),
+                    "source_sha256": track_sha256,
+                    "artifact": "track.npz",
+                },
+                "controller_backend": self.mppi_backend_name,
+                "rollout_model": snapshot_summary["model"],
+                "simulator": snapshot_summary["simulator"],
+                "mppi_params": asdict(self.mppi_params),
+                "cost_weights_at_collection": asdict(self.mppi.cost_weights),
+                "collection": {
+                    "trace_start_step": 0,
+                    "start_step": max(0, self.mppi_dataset_start_step),
+                    "stop_step": self.mppi_dataset_stop_step,
+                    "stride": self.mppi_dataset_stride,
+                    "max_snapshots": self.mppi_dataset_max_snapshots,
+                    "cost_independent_payload": (
+                        "candidate actions, raw/clipped knots, sampling noise, "
+                        "DBM trajectories, and unweighted per-step error features"
+                    ),
+                },
+                "artifacts": {
+                    "closed_loop_trace": "closed_loop_trace.jsonl",
+                    "track": "track.npz",
+                },
+                "snapshot_count": 0,
+                "snapshots": [],
+            }
+        else:
+            manifest = json.loads(manifest_path.read_text())
+        record = {
+            "control_step": snapshot_summary["scenario"]["control_step"],
+            "simulated_time_s": snapshot_summary["scenario"]["simulated_time_s"],
+            "frenet_s_m": snapshot_summary["scenario"]["frenet_s_m"],
+            "frenet_lateral_m": snapshot_summary["scenario"]["frenet_lateral_m"],
+            "frenet_heading_error_rad": snapshot_summary["scenario"][
+                "frenet_heading_error_rad"
+            ],
+            "snapshot": os.path.relpath(
+                snapshot_summary["artifacts"]["snapshot"], episode_root
+            ),
+            "summary": os.path.relpath(
+                snapshot_summary["artifacts"]["summary"], episode_root
+            ),
+        }
+        self.mppi_dataset_records.append(record)
+        manifest["snapshots"] = self.mppi_dataset_records
+        manifest["snapshot_count"] = len(self.mppi_dataset_records)
+        temporary_path = manifest_path.with_suffix(".json.tmp")
+        temporary_path.write_text(json.dumps(manifest, indent=2) + "\n")
+        temporary_path.replace(manifest_path)
+
     def _write_mppi_snapshot(
         self,
         query_state,
@@ -303,39 +663,79 @@ class CarNode(Node):
         action,
         running_state_after,
         mppi_info,
+        target,
     ):
-        """Persist one atomic controller call for sampling/cost experiments."""
-        output_dir = FilePath(self.mppi_snapshot_dir).expanduser().resolve()
+        """Persist one controller call with cost-independent rollout details."""
+        snapshot_path = target["snapshot"]
+        summary_path = target["summary"]
+        candidate_csv_path = target["candidate_csv"]
+        output_dir = snapshot_path.parent
         output_dir.mkdir(parents=True, exist_ok=True)
 
         sampled_action = mppi_info["sampled_action_sequences"].cpu().numpy()
         sampled_trajectory = mppi_info["sampled_trajectories"].cpu().numpy()
+        sampled_trajectory_full = mppi_info.get("sampled_trajectories_full")
+        if sampled_trajectory_full is not None:
+            sampled_trajectory_full = sampled_trajectory_full.cpu().numpy()
         cost = mppi_info["cost"].cpu().numpy()
         weight = mppi_info["weight"].cpu().numpy()
         components = {
             name: value.cpu().numpy()
             for name, value in mppi_info["cost_components"].items()
         }
-        sampled_knots = self.mppi._sequence_to_knots(
-            mppi_info["sampled_action_sequences"]
-        ).cpu().numpy()
+        sampled_knots = mppi_info["sampled_knots"].cpu().numpy()
+        raw_sampled_knots = mppi_info["raw_sampled_knots"].cpu().numpy()
+        sampling_noise_knots = mppi_info["sampling_noise_knots"].cpu().numpy()
+        sampling_mean_knots = mppi_info["sampling_mean_knots"].cpu().numpy()
+        raw_features = self._raw_cost_features(
+            sampled_trajectory,
+            sampled_action,
+            reference,
+            current_action,
+        )
         best_index = int(np.argmin(cost))
         rng_state_after = self.mppi._generator.get_state().cpu().numpy()
+        reference_local = self._reference_in_ego_frame(reference, full_state)
+        simulator_metadata_json = json.dumps(
+            self.simulator_metadata or {}, sort_keys=True
+        )
 
-        snapshot_path = output_dir / "snapshot.npz"
-        np.savez_compressed(
-            snapshot_path,
+        snapshot_payload = dict(
+            format_version=np.asarray(2, dtype=np.int32),
+            collection_mode=np.asarray(target["mode"]),
+            control_step=np.asarray(self._counter, dtype=np.int64),
+            simulated_time_s=np.asarray(
+                self._counter * self.control_dt, dtype=np.float64
+            ),
+            history_valid_steps=np.asarray(
+                min(self._counter, self.mppi_params.history_length),
+                dtype=np.int32,
+            ),
+            history_is_fully_observed=np.asarray(
+                self._counter >= self.mppi_params.history_length,
+                dtype=np.bool_,
+            ),
             initial_state=np.asarray(query_state, dtype=np.float32),
             initial_state_six=np.asarray(full_state, dtype=np.float32),
             initial_lateral_velocity=np.asarray(full_state[4], dtype=np.float32),
             current_action=np.asarray(current_action, dtype=np.float32),
             history=history.cpu().numpy(),
             reference=np.asarray(reference, dtype=np.float32),
+            reference_ego=reference_local,
+            frenet_pose=np.asarray(
+                [frenet_pose.s, frenet_pose.t, frenet_pose.xi], dtype=np.float32
+            ),
             mean_knots_before=mean_knots_before.cpu().numpy(),
             mean_knots_after=running_state_after.mean_knots.cpu().numpy(),
             rng_state_before=rng_state_before.cpu().numpy(),
             rng_state_after=rng_state_after,
+            sampling_noise_knots=sampling_noise_knots,
+            sampling_mean_knots=sampling_mean_knots,
+            raw_sampled_knots=raw_sampled_knots,
             sampled_knots=sampled_knots,
+            sampled_knots_clipped=np.any(
+                np.not_equal(raw_sampled_knots, sampled_knots), axis=-1
+            ),
             sampled_action_sequences=sampled_action,
             predicted_trajectories=sampled_trajectory,
             cost=cost,
@@ -344,42 +744,82 @@ class CarNode(Node):
             optimized_action_sequence=(
                 mppi_info["optimized_action_sequence"].cpu().numpy()
             ),
+            simulator_metadata_json=np.asarray(simulator_metadata_json),
+            mppi_params_json=np.asarray(json.dumps(asdict(self.mppi_params))),
+            cost_weights_json=np.asarray(
+                json.dumps(asdict(self.mppi.cost_weights))
+            ),
+            dbm_params_json=np.asarray(
+                json.dumps(asdict(self.mppi.rollout_backend.params))
+                if self.mppi_backend_name == "dbm"
+                else "{}"
+            ),
             **{f"cost_{name}": value for name, value in components.items()},
+            **raw_features,
         )
+        if sampled_trajectory_full is not None:
+            snapshot_payload["predicted_trajectories_full"] = (
+                sampled_trajectory_full
+            )
+        np.savez_compressed(snapshot_path, **snapshot_payload)
 
         component_names = list(components)
-        with (output_dir / "candidate_costs.csv").open("w", newline="") as stream:
-            writer = csv.writer(stream)
-            writer.writerow(
-                [
-                    "candidate_index",
-                    "total_cost",
-                    *[f"cost_{name}" for name in component_names],
-                    "mppi_weight",
-                    "first_acceleration",
-                    "first_steering",
-                ]
-            )
-            for index in range(len(cost)):
+        if candidate_csv_path is not None:
+            with candidate_csv_path.open("w", newline="") as stream:
+                writer = csv.writer(stream)
                 writer.writerow(
                     [
-                        index,
-                        cost[index],
-                        *[components[name][index] for name in component_names],
-                        weight[index],
-                        sampled_action[index, 0, 0],
-                        sampled_action[index, 0, 1],
+                        "candidate_index",
+                        "total_cost",
+                        *[f"cost_{name}" for name in component_names],
+                        "mppi_weight",
+                        "first_acceleration",
+                        "first_steering",
                     ]
                 )
+                for index in range(len(cost)):
+                    writer.writerow(
+                        [
+                            index,
+                            cost[index],
+                            *[components[name][index] for name in component_names],
+                            weight[index],
+                            sampled_action[index, 0, 0],
+                            sampled_action[index, 0, 1],
+                        ]
+                    )
 
+        model_summary = (
+            {
+                "backend": "dbm",
+                "checkpoint": None,
+                "dbm_params": asdict(self.mppi.rollout_backend.params),
+                "uses_observed_lateral_velocity": True,
+                "integration": "torch-rk4",
+            }
+            if self.mppi_backend_name == "dbm"
+            else {
+                "backend": self.mppi_backend_name,
+                "checkpoint": str(
+                    FilePath(self.query_checkpoint_path).resolve()
+                ),
+            }
+        )
         ranking = np.argsort(cost)
         summary = {
-            "format_version": 1,
+            "format_version": 2,
+            "collection_mode": target["mode"],
             "scenario": {
-                "source": "live clean Quick Start simulation",
+                "source": "live numeric closed-loop simulation",
                 "observation_noise": False,
                 "control_step": self._counter,
                 "simulated_time_s": self._counter * self.control_dt,
+                "history_valid_steps": min(
+                    self._counter, self.mppi_params.history_length
+                ),
+                "history_is_fully_observed": (
+                    self._counter >= self.mppi_params.history_length
+                ),
                 "track": str(FilePath(self.track_path).resolve()),
                 "frenet_s_m": float(frenet_pose.s),
                 "frenet_lateral_m": float(frenet_pose.t),
@@ -388,23 +828,21 @@ class CarNode(Node):
                 "full_state": np.asarray(full_state).tolist(),
                 "current_action": np.asarray(current_action).tolist(),
             },
-            "model": (
-                {
-                    "backend": "dbm",
-                    "checkpoint": None,
-                    "dbm_params": asdict(self.mppi.rollout_backend.params),
-                    "uses_observed_lateral_velocity": True,
-                }
-                if self.mppi_backend_name == "dbm"
-                else {
-                    "backend": self.mppi_backend_name,
-                    "checkpoint": str(
-                        FilePath(self.query_checkpoint_path).resolve()
-                    ),
-                }
-            ),
+            "simulator": self.simulator_metadata or {
+                "status": "metadata topic not received"
+            },
+            "model": model_summary,
             "mppi_params": asdict(self.mppi_params),
             "cost_weights": asdict(self.mppi.cost_weights),
+            "cost_weights_at_collection": asdict(self.mppi.cost_weights),
+            "cost_relabeling": {
+                "supported": True,
+                "raw_per_step_features": sorted(raw_features),
+                "note": (
+                    "Saved total cost and weights describe collection-time MPPI "
+                    "only; use raw trajectories/actions/features for future labels."
+                ),
+            },
             "baseline": {
                 "candidate_count": len(cost),
                 "best_candidate_index": best_index,
@@ -416,6 +854,9 @@ class CarNode(Node):
                 "effective_sample_size": float(
                     mppi_info["effective_sample_size"].cpu()
                 ),
+                "knot_clip_fraction": float(
+                    np.not_equal(raw_sampled_knots, sampled_knots).mean()
+                ),
                 "optimized_action": np.asarray(action).tolist(),
                 "best_cost_components": {
                     name: float(values[best_index])
@@ -426,17 +867,25 @@ class CarNode(Node):
             },
             "artifacts": {
                 "snapshot": str(snapshot_path),
-                "candidate_costs_csv": str(output_dir / "candidate_costs.csv"),
+                "summary": str(summary_path),
+                "candidate_costs_csv": (
+                    str(candidate_csv_path) if candidate_csv_path else None
+                ),
             },
         }
-        (output_dir / "summary.json").write_text(
-            json.dumps(summary, indent=2) + "\n"
-        )
-        self.mppi_snapshot_written = True
-        self.get_logger().info(f"MPPI snapshot written to {output_dir}")
+        summary_path.write_text(json.dumps(summary, indent=2) + "\n")
+        if target["mode"] == "legacy-single":
+            self.mppi_snapshot_written = True
+        else:
+            self._write_dataset_manifest(target["episode_root"], summary)
+            self.mppi_dataset_snapshot_count += 1
+        self.get_logger().info(f"MPPI snapshot written to {snapshot_path}")
 
     def timer_callback(self):
+        if getattr(self, "mppi_dataset_shutdown_requested", False):
+            return
 
+        control_step = self._counter
         start_time = self.get_clock().now()
         # print("here")
         if self.odom is None:
@@ -504,15 +953,14 @@ class CarNode(Node):
             if self.mppi_backend_name == "dbm":
                 self.mppi.rollout_backend.set_initial_lateral_velocity(state[4])
             mppi_history = self.query_history.tensor()
-            snapshot_this_step = (
-                not self.mppi_snapshot_written
-                and self.mppi_snapshot_step == self._counter
-                and bool(self.mppi_snapshot_dir)
-            )
-            if snapshot_this_step:
+            snapshot_targets = self._snapshot_targets()
+            snapshot_this_step = bool(snapshot_targets)
+            trace_this_step = self._dataset_trace_due()
+            if snapshot_this_step or trace_this_step:
                 mean_knots_before = self.mppi_running_params.mean_knots.detach().clone()
-                rng_state_before = self.mppi._generator.get_state().detach().clone()
                 current_action_before = self.prev_action.copy()
+            if snapshot_this_step:
+                rng_state_before = self.mppi._generator.get_state().detach().clone()
             action, self.mppi_running_params, mppi_info = self.mppi(
                 query_state,
                 self.prev_action,
@@ -521,25 +969,29 @@ class CarNode(Node):
                 self.mppi_running_params,
             )
             action = action.cpu().numpy().astype(np.float32)
+            controller_action = action.copy()
             if snapshot_this_step:
-                self._write_mppi_snapshot(
-                    query_state,
-                    state,
-                    current_action_before,
-                    mppi_history,
-                    target_pos_arr,
-                    frenet_pose,
-                    mean_knots_before,
-                    rng_state_before,
-                    action,
-                    self.mppi_running_params,
-                    mppi_info,
-                )
+                for snapshot_target in snapshot_targets:
+                    self._write_mppi_snapshot(
+                        query_state,
+                        state,
+                        current_action_before,
+                        mppi_history,
+                        target_pos_arr,
+                        frenet_pose,
+                        mean_knots_before,
+                        rng_state_before,
+                        action,
+                        self.mppi_running_params,
+                        mppi_info,
+                        snapshot_target,
+                    )
             action_candidate_np = (
                 mppi_info["optimized_action_sequence"].cpu().numpy()
             )
             sampled_traj = mppi_info["trajectory"][:, :2].cpu().numpy()
-            print("ctr time", time.time() - _ctr_start)
+            controller_duration_sec = time.time() - _ctr_start
+            print("ctr time", controller_duration_sec)
 
         elif self.controller_type == 'pure_persuit':
             # print(colored("Pure Persuit Controller", "green"))
@@ -563,6 +1015,21 @@ class CarNode(Node):
         if self.emergency_stop:
             print(colored("Emergency stop", "red"))
             action = np.array([0., 0.])
+
+        if self.controller_type == 'mppi' and trace_this_step:
+            self._append_dataset_trace(
+                control_step,
+                state,
+                current_action_before,
+                controller_action,
+                action,
+                target_pos_arr,
+                frenet_pose,
+                mean_knots_before,
+                self.mppi_running_params,
+                mppi_info,
+                controller_duration_sec,
+            )
             
         
         # Feed history to MPPI
@@ -696,6 +1163,20 @@ class CarNode(Node):
         mppi_time_msg = Float64()
         mppi_time_msg.data = duration_sec
         self.mppi_time_pub_.publish(mppi_time_msg)
+
+        if (
+            self.mppi_dataset_shutdown_on_complete
+            and self._dataset_collection_complete()
+            and not self.mppi_dataset_shutdown_requested
+        ):
+            self.mppi_dataset_shutdown_requested = True
+            self.get_logger().info(
+                "MPPI dataset collection complete; shutting down car_node"
+            )
+            threading.Thread(
+                target=self._shutdown_after_dataset_callback,
+                daemon=True,
+            ).start()
  
            
     def slow_timer_callback(self):
@@ -724,9 +1205,12 @@ class CarNode(Node):
 def main():
     rclpy.init()
     car_node = CarNode()
-    rclpy.spin(car_node)
-    car_node.destroy_node()
-    rclpy.shutdown()
+    try:
+        rclpy.spin(car_node)
+    finally:
+        car_node.destroy_node()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == '__main__':

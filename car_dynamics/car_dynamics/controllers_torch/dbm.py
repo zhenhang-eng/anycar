@@ -53,6 +53,7 @@ class TorchDynamicBicycleRolloutBackend:
     def __init__(self, params: TorchDBMParams | None = None):
         self.params = params or TorchDBMParams()
         self.initial_lateral_velocity = 0.0
+        self.last_full_trajectory: torch.Tensor | None = None
 
     def set_initial_lateral_velocity(self, lateral_velocity: float) -> None:
         """Set the simulator-observed ``vy`` used to initialize each rollout."""
@@ -139,13 +140,14 @@ class TorchDynamicBicycleRolloutBackend:
         return self._step(state, action)
 
     @torch.no_grad()
-    def __call__(
+    def rollout_full_state(
         self,
         history: torch.Tensor,
         initial_state: torch.Tensor,
         current_action: torch.Tensor,
         future_action: torch.Tensor,
     ) -> torch.Tensor:
+        """Roll out and retain all six DBM states, including lateral velocity."""
         del history, current_action
         if initial_state.shape != (1, self.state_dim):
             raise ValueError("initial_state must have shape [1, 5]")
@@ -167,5 +169,19 @@ class TorchDynamicBicycleRolloutBackend:
         output = []
         for step in range(self.horizon):
             state = self.step_full_state(state, future_action[:, step])
-            output.append(state[..., [0, 1, 2, 3, 5]])
+            output.append(state)
         return torch.stack(output, dim=1)
+
+    @torch.no_grad()
+    def __call__(
+        self,
+        history: torch.Tensor,
+        initial_state: torch.Tensor,
+        current_action: torch.Tensor,
+        future_action: torch.Tensor,
+    ) -> torch.Tensor:
+        full_trajectory = self.rollout_full_state(
+            history, initial_state, current_action, future_action
+        )
+        self.last_full_trajectory = full_trajectory
+        return full_trajectory[..., [0, 1, 2, 3, 5]]

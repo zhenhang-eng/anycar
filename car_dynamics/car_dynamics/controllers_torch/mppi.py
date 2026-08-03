@@ -238,7 +238,9 @@ class TorchMPPIController:
                 device=self.device,
             ) * self._noise_sigma
             noise[0].zero_()  # Always retain the current mean as a candidate.
-            sampled_knots = mean_knots[None, :, :] + noise
+            sampling_mean_knots = mean_knots
+            raw_sampled_knots = sampling_mean_knots[None, :, :] + noise
+            sampled_knots = raw_sampled_knots
             sampled_knots = torch.clamp(
                 sampled_knots, self._action_min, self._action_max
             )
@@ -269,6 +271,10 @@ class TorchMPPIController:
                 cost_components,
                 weight,
                 weighted_sequence,
+                noise,
+                sampling_mean_knots,
+                raw_sampled_knots,
+                sampled_knots,
             )
 
         assert last is not None
@@ -279,6 +285,10 @@ class TorchMPPIController:
             cost_components,
             weight,
             weighted_sequence,
+            noise,
+            sampling_mean_knots,
+            raw_sampled_knots,
+            sampled_knots,
         ) = last
         action = weighted_sequence[0]
         shifted_sequence = torch.cat(
@@ -291,6 +301,10 @@ class TorchMPPIController:
         info: Dict[str, object] = {
             "optimized_action_sequence": weighted_sequence.detach(),
             "sampled_action_sequences": sampled_action.detach(),
+            "sampling_noise_knots": noise.detach(),
+            "sampling_mean_knots": sampling_mean_knots.detach(),
+            "raw_sampled_knots": raw_sampled_knots.detach(),
+            "sampled_knots": sampled_knots.detach(),
             "best_sampled_action_sequence": sampled_action[best_index].detach(),
             "sampled_trajectories": trajectory.detach(),
             "trajectory": trajectory[best_index].detach(),
@@ -302,4 +316,9 @@ class TorchMPPIController:
             "best_cost": cost[best_index].detach(),
             "effective_sample_size": (1.0 / weight.square().sum()).detach(),
         }
+        full_trajectory = getattr(
+            self.rollout_backend, "last_full_trajectory", None
+        )
+        if full_trajectory is not None:
+            info["sampled_trajectories_full"] = full_trajectory.detach()
         return action.detach(), new_state, info

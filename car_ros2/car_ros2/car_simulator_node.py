@@ -1,10 +1,13 @@
 from termcolor import colored
+from dataclasses import asdict
+import json
 import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import PoseWithCovarianceStamped, PoseStamped, Point, PolygonStamped, Point32, Pose
 from nav_msgs.msg import Odometry
 from ackermann_msgs.msg import AckermannDriveStamped
 from geometry_msgs.msg import TransformStamped
+from std_msgs.msg import String
 from tf2_ros import TransformBroadcaster
 # import tf_transformations
 
@@ -32,6 +35,20 @@ class CarSimulatorNode(Node):
         self.env_params = load_env_params_numeric()
         # self.env_params = load_uncorrect_env_params_numeric()
 
+        initial_state_text = str(
+            self.declare_parameter(
+                "initial_state", "0,0,0,0,0,0"
+            ).value
+        )
+        initial_state_values = [
+            float(value.strip()) for value in initial_state_text.split(",")
+        ]
+        if len(initial_state_values) != 6:
+            raise ValueError(
+                "initial_state must contain x,y,yaw,vx,vy,yawrate"
+            )
+        self.initial_state = np.asarray(initial_state_values, dtype=np.float32)
+
         self.env = make_env(self.env_params)
         self.get_logger().info(
             "Numeric DBM scenario: "
@@ -40,6 +57,18 @@ class CarSimulatorNode(Node):
         )
 
         self.initialized = False
+        self.simulator_metadata = {
+            "environment": asdict(self.env_params),
+            "dynamic_model": self.env.sim.params.to_dict(),
+            "integration": "JAX RK4 dynamic bicycle step_gym",
+            "observation_state": ["x", "y", "yaw", "vx", "vy", "yawrate"],
+            "action": ["normalized_acceleration", "normalized_steering"],
+            "observation_noise": False,
+            "initial_state": self.initial_state.tolist(),
+        }
+        self.simulator_metadata_pub = self.create_publisher(
+            String, "simulator_metadata", 1
+        )
 
         if CORRECT_SLAM:
             self.odom_slam_pub = self.create_publisher(Odometry, "odom", 1)
@@ -54,7 +83,14 @@ class CarSimulatorNode(Node):
         self.fixed_duration = 100
         self.start_time = self.get_clock().now()
 
+    def publish_simulator_metadata(self):
+        message = String()
+        message.data = json.dumps(self.simulator_metadata, sort_keys=True)
+        self.simulator_metadata_pub.publish(message)
+
     def timer_callback(self):
+
+        self.publish_simulator_metadata()
 
         current_time = self.get_clock().now()
         if (current_time - self.start_time).nanoseconds / 1e9 > self.fixed_duration:
@@ -62,6 +98,14 @@ class CarSimulatorNode(Node):
 
         if not self.initialized:
             obs = self.env.reset()
+            (
+                self.env.state.x,
+                self.env.state.y,
+                self.env.state.psi,
+                self.env.state.vx,
+                self.env.state.vy,
+                self.env.state.omega,
+            ) = self.initial_state.tolist()
             px, py, psi, vx, vy, omega = self.env.obs_state().tolist()
             odom = Odometry()
             odom.header.stamp = self.get_clock().now().to_msg()
@@ -82,6 +126,7 @@ class CarSimulatorNode(Node):
             self.timer_.cancel()
 
     def vehicle_cmd_callback(self, msg):
+        self.publish_simulator_metadata()
         now = self.get_clock().now().to_msg()
         if not CORRECT_SLAM:
             self.initialized = True
@@ -159,10 +204,14 @@ def main(args=None):
 
     car_simulator_node = CarSimulatorNode()
 
-    rclpy.spin(car_simulator_node)
-
-    car_simulator_node.destroy_node()
-    rclpy.shutdown()
+    try:
+        rclpy.spin(car_simulator_node)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        car_simulator_node.destroy_node()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == "__main__":

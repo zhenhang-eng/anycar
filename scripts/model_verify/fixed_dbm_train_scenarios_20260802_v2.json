@@ -1,0 +1,79 @@
+{
+  "description": "Fixed-DBM closed-loop training seed with track-phase, lateral-offset, heading-error, and MPPI-noise diversity.",
+  "collection_dir": "/disk/collect_data_from_anycar/mppi_rl_closed_loop/fixed_dbm_train_seed_20260802_v2",
+  "collection": {
+    "start_step": 250,
+    "stride": 25,
+    "max_snapshots": 12,
+    "trace_start_step": 0,
+    "num_samples": 256,
+    "num_iterations": 1
+  },
+  "track_source": "/home/plusai/anycar/install/car_planner/lib/python3.10/site-packages/assets/cuc_inside.csv",
+  "episodes": [
+    {
+      "episode_id": "episode_000",
+      "track_index": 0,
+      "lateral_offset_m": 0.0,
+      "heading_error_rad": 0.0,
+      "initial_state": "0.292340,0.222742,-0.975158,0,0,0",
+      "mppi_seed": 3500
+    },
+    {
+      "episode_id": "episode_001",
+      "track_index": 94,
+      "lateral_offset_m": 0.08,
+      "heading_error_rad": 0.06,
+      "initial_state": "4.870155,-0.124629,-0.016983,0,0,0",
+      "mppi_seed": 3501
+    },
+    {
+      "episode_id": "episode_002",
+      "track_index": 188,
+      "lateral_offset_m": -0.08,
+      "heading_error_rad": -0.06,
+      "initial_state": "9.692614,0.088915,0.680912,0,0,0",
+      "mppi_seed": 3502
+    },
+    {
+      "episode_id": "episode_003",
+      "track_index": 282,
+      "lateral_offset_m": 0.12,
+      "heading_error_rad": -0.08,
+      "initial_state": "8.609010,4.318554,1.318021,0,0,0",
+      "mppi_seed": 3503
+    },
+    {
+      "episode_id": "episode_004",
+      "track_index": 376,
+      "lateral_offset_m": -0.12,
+      "heading_error_rad": 0.08,
+      "initial_state": "7.850446,8.416676,2.325630,0,0,0",
+      "mppi_seed": 3504
+    },
+    {
+      "episode_id": "episode_005",
+      "track_index": 470,
+      "lateral_offset_m": 0.06,
+      "heading_error_rad": 0.1,
+      "initial_state": "4.114517,10.651518,-2.805957,0,0,0",
+      "mppi_seed": 3505
+    },
+    {
+      "episode_id": "episode_006",
+      "track_index": 564,
+      "lateral_offset_m": -0.06,
+      "heading_error_rad": -0.1,
+      "initial_state": "2.138279,7.009401,-1.140762,0,0,0",
+      "mppi_seed": 3506
+    },
+    {
+      "episode_id": "episode_007",
+      "track_index": 658,
+      "lateral_offset_m": 0.0,
+      "heading_error_rad": 0.12,
+      "initial_state": "2.691339,3.606978,-2.488169,0,0,0",
+      "mppi_seed": 3507
+    }
+  ]
+}

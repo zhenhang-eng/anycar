@@ -2,7 +2,14 @@
 
 更新时间：2026-07-31。
 
+2026-08-02 之后的数据、策略路线和下一项实现任务见
+[MPPI sampling-center 策略网络：工作交接](mppi_sampling_center_handoff_20260802.md)。
+恢复工作时以该交接文档为当前状态，本文件保留固定快照优化实验记录。
+
 ## 当前目标和边界
+
+后续使用策略网络学习 sampling center 的完整设计、训练阶段和验证边界见
+[用强化学习生成 MPPI 采样中心：设计与实施方案](rl_mppi_sampling_center_design_20260731.md)。
 
 下一阶段只优化 MPPI 候选动作序列的生成方式。为保证对比有效，下列内容固定：
 
@@ -525,15 +532,25 @@ python scripts/model_verify/evaluate_mppi_sampling_snapshot.py \
 
 ## 代码状态
 
-- `controllers_torch/mppi.py` 可以返回全部 sampled sequences、rollouts 和 cost 分项；
-- `car_node.py` 支持用 `mppi_snapshot_step`、`mppi_snapshot_dir` 原子截取快照；
+- `controllers_torch/mppi.py` 可以返回 sampling mean/noise、clip 前后 knots、全部
+  sampled sequences、rollouts 和 cost 分项；
+- `car_node.py` 保留 `mppi_snapshot_step` 单步接口，并新增固定 DBM 的多步闭环数据集
+  采集参数；
 - `controllers_torch/dbm.py` 使用观测到的真实 `vy` 初始化 DBM rollout；
+- DBM backend 可以额外保留 `[x,y,yaw,vx,vy,yawrate]` 完整六状态轨迹；
 - `evaluate_mppi_sampling_snapshot.py` 默认用固定 DBM 输入评价任意候选动作序列；
+- `validate_mppi_closed_loop_dataset.py` 可验证 episode manifest、轨迹、raw feature 和
+  采集时 cost 的重放一致性；
 - snapshot 默认关闭：`mppi_snapshot_step=-1`，正常 Quick Start 不写文件；
 - 观测噪声注入已从仿真器移除；
 - Query 的 PyTorch/ONNX rollout 仍可用于后续迁移验证，但不是采样研究主基准；
 - 旧 Query 快照保留在 `live_query_clean_step0340`，不与 DBM 基准混用；
 - JAX MPPI 不在维护范围内。
+
+批量闭环数据写入专用目录
+`/disk/collect_data_from_anycar/mppi_rl_closed_loop`。采集 schema、启动命令和首批
+pilot 结果见
+[固定 DBM 的 MPPI 闭环数据采集](mppi_closed_loop_dataset_collection_20260802.md)。
 
 ## 后续比较要求
 
