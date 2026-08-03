@@ -1,0 +1,19 @@
+{
+  "format_version": 1,
+  "description": "T0 DBM proposal-teacher configuration. The first configuration exactly reproduces the cost and temperature used by fixed_dbm_train_seed_20260802_v2.",
+  "configs": [
+    {
+      "id": "collection_default",
+      "description": "Collection-time MPPI objective; serves as the first BC/critic teacher target.",
+      "temperature": 1.0,
+      "cost_weights": {
+        "position": 5.0,
+        "yaw": 5.0,
+        "vx": 1.0,
+        "yawrate": 0.0,
+        "acceleration_rate": 0.05,
+        "steering_rate": 0.1
+      }
+    }
+  ]
+}

@@ -1,11 +1,12 @@
 # MPPI sampling-center 策略网络：工作交接
 
-更新时间：2026-08-02
+更新时间：2026-08-03
 
 ## 接续入口
 
 后续恢复本任务时，先读本文，然后按“下一项实现任务”继续。当前没有训练或 ROS
-采集进程在运行，尚未开始 teacher 标签生成和策略网络训练。
+采集进程在运行；T0 teacher sidecar 已生成并验证，尚未开始 T1 高预算 teacher 和
+策略网络训练。
 
 项目目标是让轻量策略网络根据状态、250 步 history、reference 和 MPPI warm start，
 预测 8×2 knots 的 sampling-center 修正，再由 MPPI 在新中心附近采样。网络不直接
@@ -118,10 +119,16 @@ temperature 为 1.0，yaw-rate 权重为 0。保存的未加权逐步 features �
 - `scripts/model_verify/validate_mppi_closed_loop_dataset.py`：兼容旧 pilot，并验证
   schema、cost replay、track/hash、连续 trace、action 链和 snapshot/trace 一致性；
 - `scripts/model_verify/fixed_dbm_train_scenarios_20260802_v2.json`：正式批次场景表。
+- `scripts/model_verify/generate_dbm_proposal_teacher.py`：从 schema-v2 raw features
+  复算多配置 candidate cost/weight，生成 best/soft teacher sidecar；
+- `scripts/model_verify/validate_dbm_proposal_teacher.py`：校验 source/config hash，并独立
+  复算 T0 标签；
+- `scripts/model_verify/dbm_teacher_cost_configs_20260803_v1.json`：当前 teacher cost
+  配置，第一项严格复现 collection objective。
 
 尚未实现：
 
-- `generate_dbm_proposal_teacher.py`；
+- T1 高预算/多中心 DBM teacher rollout；
 - proposal policy/critic 网络；
 - BC/bandit 训练脚本；
 - 离线 proposal evaluator；
@@ -130,16 +137,17 @@ temperature 为 1.0，yaw-rate 权重为 0。保存的未加权逐步 features �
 
 ## 下一项实现任务
 
-第一项只实现 **DBM teacher/relabel pipeline**，先不要接 Query、PPO、ONNX 或 ROS
-在线策略：
+T0 **DBM teacher/relabel pipeline** 已完成，先不要接 Query、PPO、ONNX 或 ROS 在线
+策略。正式标签位于：
 
 ```text
-scripts/model_verify/generate_dbm_proposal_teacher.py
+/disk/collect_data_from_anycar/mppi_rl_closed_loop/labels/
+dbm_teacher_t0_20260803_v1
 ```
 
 建议分两步：
 
-### T0：复用现有 256 candidates 打通标签格式
+### T0：复用现有 256 candidates 打通标签格式（已完成）
 
 对每个 snapshot 和每组 cost-weight/temperature 配置，从保存的 raw features/轨迹重算：
 
@@ -148,25 +156,31 @@ scripts/model_verify/generate_dbm_proposal_teacher.py
 - soft-weighted teacher center；
 - 相对实际 proposal center `sampling_mean_knots` 的 `teacher_delta_knots`；当前单轮
   MPPI 应同时断言它与 `mean_knots_before` 一致；
-- warm candidate cost、best/soft-center regret、ESS、clip/boundary 指标。
+- warm candidate cost、best regret、soft candidate-cost expectation、ESS、clip/boundary
+  指标。
 
-T0 不产生新的 DBM rollout，只验证配置、sidecar schema、确定性和训练读取接口。
+T0 不产生新的 DBM rollout，只验证配置、sidecar schema、确定性和训练读取接口。soft
+center 自身没有在 T0 rollout，因此不能把 weighted candidate cost expectation 称为
+soft-center cost。96 帧已全部通过 validator：warm candidate 为 best 的比例为 44/96，
+平均 ESS 1.543，best candidate clipping 比例 20.8%。详细结果见
+[teacher 标签方案与实现状态](mppi_teacher_label_plan_20260803.md)。
 
-### T1：生成高预算/多中心 DBM teacher
+### T1：生成高预算/多中心 DBM teacher（下一项）
 
 T0 验证通过后，从 snapshot 恢复 state/history/reference/warm knots，用高预算 DBM
 或多中心 bank 搜索更可靠的 teacher。teacher 预算、center bank 和 cost 配置必须进入
 manifest。若最优候选频繁落在 T0 bank 边界，不能把 T0 best 当最终 teacher。
 
-建议 sidecar 布局：
+当前 T0 sidecar 布局：
 
 ```text
 /disk/collect_data_from_anycar/mppi_rl_closed_loop/labels/
-  dbm_teacher_v1/
+  dbm_teacher_t0_20260803_v1/
     manifest.json
     splits.json
-    fixed_dbm_train_seed_20260802_v2/
-      episode_000/step_000250.npz
+    cost_configs.json
+    labels.csv
+    episode_000/step_000250.npz
 ```
 
 原 collection 中的 `.npz`、manifest 和 trace 不得修改。
@@ -207,7 +221,8 @@ fixed_dbm_train_seed_20260802_v2/episode_000
 最近一次状态：`car_dynamics` 和 `car_ros2` colcon 构建通过；8 个 schema-v2 episode
 及 3 个旧 pilot 全部通过 validator，共 120 个 snapshot、30,720 条 candidate
 rollout；场景表与 manifest 的 initial state/MPPI seed 一致；AnyCar skill 结构校验
-通过；没有残留 ROS 采集进程。
+通过；T0 正式 sidecar 的 96 个 snapshot/label 均通过独立 validator；没有残留 ROS
+采集进程。
 
 本批 schema-v2 采集实现、validator、场景表和文档已随本文整理提交。恢复时仍应先
 运行 `git status --short`，保留用户后续产生的修改。正式 episode 是在 dirty 工作树
@@ -218,9 +233,10 @@ rollout；场景表与 manifest 的 initial state/MPPI seed 一致；AnyCar skil
 
 1. 本文；
 2. [固定 DBM 的 MPPI 闭环数据采集](mppi_closed_loop_dataset_collection_20260802.md)；
-3. [策略网络完整设计](rl_mppi_sampling_center_design_20260731.md)；
-4. `/disk/collect_data_from_anycar/mppi_rl_closed_loop/DATASET_INDEX.md`；
-5. `/home/plusai/.codex/skills/manage-anycar-environment/references/mppi-closed-loop-data.md`。
+3. [teacher 标签方案与实现状态](mppi_teacher_label_plan_20260803.md)；
+4. [策略网络完整设计](rl_mppi_sampling_center_design_20260731.md)；
+5. `/disk/collect_data_from_anycar/mppi_rl_closed_loop/DATASET_INDEX.md`；
+6. `/home/plusai/.codex/skills/manage-anycar-environment/references/mppi-closed-loop-data.md`。
 
 如果这些记录与运行文件发生冲突，以原始 episode manifest、scenario plan 和 validator
 结果为准，并在继续训练前更新本文。

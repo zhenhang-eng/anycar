@@ -803,8 +803,8 @@ RL 的离线训练 rollout 不计入在线预算，但必须单独报告训练�
 
 ## 17. 建议代码和产物布局
 
-闭环 snapshot 数据采集和验证器已于 2026-08-02 实现；proposal/teacher/训练代码仍按
-下列职责继续拆分：
+闭环 snapshot 数据采集和验证器已于 2026-08-02 实现；T0 teacher/relabel 生成器与
+验证器已于 2026-08-03 实现；proposal/训练代码继续按下列职责拆分：
 
 ```text
 car_foundation/car_foundation/
@@ -813,7 +813,8 @@ car_foundation/car_foundation/
 
 scripts/model_verify/
   validate_mppi_closed_loop_dataset.py  # 已实现
-  generate_dbm_proposal_teacher.py
+  generate_dbm_proposal_teacher.py      # T0 已实现
+  validate_dbm_proposal_teacher.py      # T0 已实现
   train_mppi_proposal_bc.py
   finetune_mppi_proposal_bandit.py
   evaluate_mppi_proposal_offline.py
@@ -834,6 +835,8 @@ outputs/mppi_proposal/
 
 当前采集 schema、启动参数和首批 pilot 结果见
 [固定 DBM 的 MPPI 闭环数据采集](mppi_closed_loop_dataset_collection_20260802.md)。
+T0/T1 teacher 的标签定义、计划和当前结果见
+[teacher 标签方案与实现状态](mppi_teacher_label_plan_20260803.md)。
 
 ## 18. 分阶段决策点
 
@@ -849,7 +852,7 @@ outputs/mppi_proposal/
 | Query | Query 推理下是否保持 DBM replay 质量 | 不接在线 Query proposal |
 | ONNX/ROS | 数值、延迟和 fallback 是否合格 | 保持离线研究状态 |
 
-## 19. 2026-08-02 数据采集状态
+## 19. 2026-08-03 数据与 teacher 状态
 
 - 已支持固定 DBM 参数的 schema-v2 闭环 snapshot、连续 trace、赛道固化、history mask、
   独立 seed 和自动退出；
@@ -857,16 +860,18 @@ outputs/mppi_proposal/
   snapshot、24,576 条候选 rollout 和 4,208 条 step-0-through-525 trace；
 - 8 个新 episode 与 3 个旧 pilot 全部通过 validator；
 - 原始轨迹支持后续改变 cost 权重/temperature，以及 DBM/Query 分别重新标注；
-- teacher、reward sidecar、BC、critic 和策略闭环 A/B 尚未实现；
-- 下一步不再盲目扩数据，先用现有数据实现 DBM T0 relabel/teacher pipeline，再根据
-  candidate bank 边界率和策略闭环分布偏移定向扩充。
+- T0 teacher sidecar 已实现并在 96 帧上通过 source hash、cost/weight 和 label 独立复算；
+- T0 平均 ESS 1.543，44/96 帧 warm 已是 best，20.8% 的 best candidate 发生 clipping，
+  因而只作为 pipeline/初版 BC 标签，不能视作最终 teacher；
+- T1 高预算/多中心 DBM teacher、reward sidecar、BC、critic 和策略闭环 A/B 尚未实现；
+- 下一步不再盲目扩数据，先做 T1，并根据 bank 边界率和策略闭环分布偏移定向扩充。
 
 ## 20. 当前推荐结论
 
 推荐从以下最小方案开始：
 
-> 先复用现有 DBM candidates 打通多 cost-weight/temperature 的 T0 标签 sidecar，
-> 再使用 DBM 高预算/多中心 teacher 生成跨状态监督目标，训练输出 16 维 bounded
+> 已复用现有 DBM candidates 打通可配置 cost-weight/temperature 的 T0 标签 sidecar；
+> 下一步使用 DBM 高预算/多中心 teacher 生成跨状态监督目标，训练输出 16 维 bounded
 > center residual 的轻量网络；随后在 DBM 上完成单步 contextual-bandit 和严格闭环
 > A/B。DBM 阶段通过后才切换 Query 重新 rollout/relabel。
 

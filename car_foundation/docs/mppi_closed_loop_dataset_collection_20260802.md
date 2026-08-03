@@ -162,10 +162,25 @@ trace，约 112 MiB；全部 snapshot history 完全观测，8 个 episode 均�
 
 ## 下一步数据扩展
 
-1. 按完整 episode 预先划分 train/validation/test，避免相邻帧泄漏。
+T0 teacher sidecar 已于 2026-08-03 生成：
+
+```text
+/disk/collect_data_from_anycar/mppi_rl_closed_loop/labels/
+dbm_teacher_t0_20260803_v1
+```
+
+它按 episode 暂分 6/1/1，复用当前 256 candidates 生成 best/soft teacher delta、cost、
+weight、regret、ESS 和 clipping 诊断，并保存 source SHA256。原 collection 未修改。实现、
+标签语义和结果见
+[teacher 标签方案与实现状态](mppi_teacher_label_plan_20260803.md)。
+
+下一步：
+
+1. 使用固定 DBM 做高预算/多中心 T1 teacher，真正 rollout 新 proposal center。
 2. 根据曲率、速度、误差和 warm-start cost 分桶检查 v2 seed 覆盖度。
-3. 追加速度/外扰/恢复边界和不同动力学参数的独立 collection，不混入固定 DBM split。
-4. 在轨迹库稳定后，实现多 cost 权重/temperature relabel、teacher 搜索和 reward 计算。
+3. 用 T1 teacher 做初版 BC 和 held-out DBM proposal 评估。
+4. 追加速度/外扰/恢复边界和不同动力学参数的独立 collection，不混入固定 DBM split。
+5. 再扩展多 cost 权重/temperature、reward sidecar 和 TD3/SAC 训练。
 
 ## 当前限制
 
