@@ -124,9 +124,50 @@ class TorchDynamicBicycleRolloutBackend:
             k3 = self._derivative(state + 0.5 * dt * k2, action)
             k4 = self._derivative(state + dt * k3, action)
             state = state + dt * (k1 + 2 * k2 + 2 * k3 + k4) / 6.0
-        state = state.clone()
-        state[..., 2] = torch.atan2(torch.sin(state[..., 2]), torch.cos(state[..., 2]))
-        return state
+        wrapped_yaw = torch.atan2(torch.sin(state[..., 2]), torch.cos(state[..., 2]))
+        # Avoid an in-place slice assignment here.  The normal MPPI path runs
+        # without gradients, but the offline GT diagnostic differentiates the
+        # exact same RK4 rollout with respect to a complete action sequence.
+        return torch.cat(
+            (state[..., :2], wrapped_yaw.unsqueeze(-1), state[..., 3:]), dim=-1
+        )
+
+    def rollout_full_state_differentiable(
+        self,
+        initial_state: torch.Tensor,
+        future_action: torch.Tensor,
+    ) -> torch.Tensor:
+        """Differentiable six-state rollout for offline oracle diagnostics.
+
+        This deliberately omits ``history`` and ``current_action`` because the
+        analytic DBM does not consume them.  Online MPPI should keep using the
+        no-grad public backend below; this method is not a Query/ONNX contract.
+        """
+        if initial_state.ndim != 2 or initial_state.shape[1] not in (5, 6):
+            raise ValueError("initial_state must have shape [1/N, 5/6]")
+        if future_action.ndim != 3 or tuple(future_action.shape[1:]) != (
+            self.horizon,
+            self.action_dim,
+        ):
+            raise ValueError("future_action must have shape [N, 50, 2]")
+        candidate_count = future_action.shape[0]
+        if initial_state.shape[0] not in (1, candidate_count):
+            raise ValueError("initial_state batch must be one or match future_action")
+        initial = initial_state.expand(candidate_count, -1)
+        if initial.shape[1] == 5:
+            initial_vy = torch.full_like(
+                initial[..., 3:4], self.initial_lateral_velocity
+            )
+            state = torch.cat(
+                (initial[..., :4], initial_vy, initial[..., 4:5]), dim=-1
+            )
+        else:
+            state = initial
+        output = []
+        for step in range(self.horizon):
+            state = self._step(state, future_action[:, step])
+            output.append(state)
+        return torch.stack(output, dim=1)
 
     @torch.no_grad()
     def step_full_state(
@@ -157,20 +198,7 @@ class TorchDynamicBicycleRolloutBackend:
         ):
             raise ValueError("future_action must have shape [N, 50, 2]")
 
-        candidate_count = future_action.shape[0]
-        initial = initial_state.expand(candidate_count, -1)
-        initial_vy = torch.full_like(
-            initial[..., 3:4], self.initial_lateral_velocity
-        )
-        state = torch.cat(
-            (initial[..., :4], initial_vy, initial[..., 4:5]),
-            dim=-1,
-        )
-        output = []
-        for step in range(self.horizon):
-            state = self.step_full_state(state, future_action[:, step])
-            output.append(state)
-        return torch.stack(output, dim=1)
+        return self.rollout_full_state_differentiable(initial_state, future_action)
 
     @torch.no_grad()
     def __call__(

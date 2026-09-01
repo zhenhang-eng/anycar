@@ -14,6 +14,64 @@ import torch
 import torch.nn.functional as F
 
 
+FIXED_HADAMARD_BANK_VERSION = "fixed-hadamard-64-v1"
+
+
+def fixed_hadamard_knot_noise(
+    noise_sigma: Union[Sequence[float], torch.Tensor],
+    *,
+    num_knots: int = 8,
+    action_dim: int = 2,
+    radii: Sequence[float] = (0.10, 0.30),
+    device: Union[str, torch.device] = "cpu",
+    dtype: torch.dtype = torch.float32,
+) -> torch.Tensor:
+    """Return the frozen 64-candidate center-neighborhood design.
+
+    The ordering mirrors the existing MPPI layout: candidate zero is the exact
+    center, candidate one is a deterministic extra point, and the remaining 62
+    candidates are antithetic pairs.  The 16 Sylvester-Hadamard rows span the
+    complete 8x2 knot space.  ``radii`` are measured in source-MPPI sigma units.
+
+    This bank is intentionally independent of the controller RNG.  It is used
+    only when explicitly requested; Gaussian sampling remains the default.
+    """
+    dimension = int(num_knots) * int(action_dim)
+    if dimension != 16:
+        raise ValueError("fixed-hadamard-64-v1 requires an 8x2 knot space")
+    if len(radii) != 2 or not 0 < float(radii[0]) < float(radii[1]):
+        raise ValueError("radii must contain two increasing positive values")
+    sigma = torch.as_tensor(noise_sigma, dtype=dtype, device=device).reshape(action_dim)
+    if torch.any(sigma <= 0):
+        raise ValueError("noise_sigma entries must be positive")
+
+    matrix = torch.ones((1, 1), dtype=dtype, device=device)
+    while matrix.shape[0] < dimension:
+        matrix = torch.cat(
+            (
+                torch.cat((matrix, matrix), dim=1),
+                torch.cat((matrix, -matrix), dim=1),
+            ),
+            dim=0,
+        )
+    directions = matrix.reshape(dimension, num_knots, action_dim)
+    scaled_directions = directions * sigma.reshape(1, 1, action_dim)
+    inner, outer = (float(radii[0]), float(radii[1]))
+
+    values = [torch.zeros_like(scaled_directions[0])]
+    # One fixed extra point preserves the 0 + extra + 31 antithetic-pair
+    # structure used by the 64-sample research MPPI wrapper.
+    values.append(outer * scaled_directions[-1])
+    for direction in scaled_directions:
+        values.extend((inner * direction, -inner * direction))
+    for direction in scaled_directions[:-1]:
+        values.extend((outer * direction, -outer * direction))
+    result = torch.stack(values)
+    if result.shape != (64, num_knots, action_dim):
+        raise AssertionError("fixed Hadamard bank construction produced the wrong shape")
+    return result
+
+
 @dataclass(frozen=True)
 class TorchMPPICostWeights:
     position: float = 5.0
@@ -39,6 +97,8 @@ class TorchMPPIParams:
     temperature: float = 1.0
     mean_update_rate: float = 1.0
     noise_sigma: Tuple[float, float] = (0.25, 0.35)
+    sampling_mode: str = "gaussian"
+    fixed_noise_radii: Tuple[float, float] = (0.10, 0.30)
     action_min: Tuple[float, float] = (-1.0, -1.0)
     action_max: Tuple[float, float] = (1.0, 1.0)
     seed: int = 3407
@@ -63,6 +123,19 @@ class TorchMPPIParams:
             raise ValueError("mean_update_rate must be within (0, 1]")
         if any(value <= 0 for value in self.noise_sigma):
             raise ValueError("noise_sigma entries must be positive")
+        if self.sampling_mode not in ("gaussian", "fixed_hadamard_64"):
+            raise ValueError(
+                "sampling_mode must be 'gaussian' or 'fixed_hadamard_64'"
+            )
+        if self.sampling_mode == "fixed_hadamard_64" and self.num_samples != 64:
+            raise ValueError("fixed_hadamard_64 requires num_samples=64")
+        if (
+            len(self.fixed_noise_radii) != 2
+            or not 0 < self.fixed_noise_radii[0] < self.fixed_noise_radii[1]
+        ):
+            raise ValueError(
+                "fixed_noise_radii must contain two increasing positive values"
+            )
 
 
 @dataclass
@@ -100,6 +173,25 @@ class TorchMPPIController:
         ).round().to(torch.long)
         self._generator = torch.Generator(device=self.device)
         self._generator.manual_seed(self.params.seed)
+
+    def _sample_knot_noise(self) -> torch.Tensor:
+        if self.params.sampling_mode == "fixed_hadamard_64":
+            return fixed_hadamard_knot_noise(
+                self._noise_sigma,
+                num_knots=self.params.num_knots,
+                action_dim=self.params.action_dim,
+                radii=self.params.fixed_noise_radii,
+                device=self.device,
+            )
+        noise = torch.randn(
+            self.params.num_samples,
+            self.params.num_knots,
+            self.params.action_dim,
+            generator=self._generator,
+            device=self.device,
+        ) * self._noise_sigma
+        noise[0].zero_()  # Always retain the current mean as a candidate.
+        return noise
 
     def get_init_state(
         self, initial_action: Optional[Sequence[float]] = None
@@ -204,6 +296,139 @@ class TorchMPPIController:
         )
         return components
 
+    @torch.no_grad()
+    def evaluate_action_sequences(
+        self,
+        initial_state,
+        current_action,
+        history,
+        reference,
+        action_sequences,
+    ) -> Dict[str, object]:
+        """Roll out and score deterministic action sequences without MPPI updates.
+
+        This is the model-space primitive used by a baseline-preserving guard.
+        It deliberately does not sample, consume the controller RNG, or mutate a
+        :class:`TorchMPPIRunningState`.
+        """
+        initial_state = torch.as_tensor(
+            initial_state, dtype=torch.float32, device=self.device
+        ).reshape(1, self.params.state_dim)
+        current_action = torch.as_tensor(
+            current_action, dtype=torch.float32, device=self.device
+        ).reshape(1, self.params.action_dim)
+        history = torch.as_tensor(history, dtype=torch.float32, device=self.device)
+        if tuple(history.shape) != (1, self.params.history_length, 7):
+            raise ValueError("history must have shape [1, 250, 7]")
+        reference = self._prepare_reference(reference)
+        action_sequences = torch.as_tensor(
+            action_sequences, dtype=torch.float32, device=self.device
+        )
+        if action_sequences.ndim == 2:
+            action_sequences = action_sequences.unsqueeze(0)
+        expected = (
+            self.params.horizon,
+            self.params.action_dim,
+        )
+        if action_sequences.ndim != 3 or tuple(action_sequences.shape[1:]) != expected:
+            raise ValueError("action_sequences must have shape [N,50,2] or [50,2]")
+        action_sequences = torch.clamp(
+            action_sequences, self._action_min, self._action_max
+        )
+        trajectories = self.rollout_backend(
+            history, initial_state, current_action, action_sequences
+        ).to(self.device)
+        components = self.trajectory_cost_components(
+            trajectories, action_sequences, reference, current_action
+        )
+        cost = sum(components.values())
+        return {
+            "action_sequences": action_sequences.detach(),
+            "trajectories": trajectories.detach(),
+            "cost": cost.detach(),
+            "cost_components": {
+                name: value.detach() for name, value in components.items()
+            },
+        }
+
+    @torch.no_grad()
+    def hard_guard_action_sequence(
+        self,
+        initial_state,
+        current_action,
+        history,
+        reference,
+        warm_mppi_sequence,
+        proposal_sequence,
+        guard_state: Optional[Dict[str, int]] = None,
+        switch_margin: float = 0.0,
+        min_dwell: int = 0,
+        warm_hard_return: bool = False,
+    ) -> Dict[str, object]:
+        """Choose the lower-model-cost sequence without blending actions.
+
+        Candidate zero is always the original warm-MPPI weighted output and
+        candidate one is the deterministic proposal.  Consequently the selected
+        model cost cannot exceed the original controller output's evaluated cost
+        when ``guard_state`` is None or the hysteresis parameters are zero.
+
+        Optional hysteresis: ``guard_state`` carries ``selected_index`` and
+        ``dwell`` across steps.  A branch switch is only allowed once the
+        incumbent has been held for ``min_dwell`` steps and the challenger's
+        model cost undercuts the incumbent by more than ``switch_margin``.
+        With the defaults (0.0/0) and an initial warm incumbent the selection
+        matches the plain argmin, including warm-wins-ties semantics.
+        """
+        candidates = torch.stack(
+            (
+                torch.as_tensor(warm_mppi_sequence, dtype=torch.float32, device=self.device),
+                torch.as_tensor(proposal_sequence, dtype=torch.float32, device=self.device),
+            )
+        )
+        result = self.evaluate_action_sequences(
+            initial_state,
+            current_action,
+            history,
+            reference,
+            candidates,
+        )
+        if guard_state is None:
+            selected_index = int(torch.argmin(result["cost"]).item())
+        else:
+            incumbent = int(guard_state.get("selected_index", 0))
+            dwell = int(guard_state.get("dwell", 0))
+            incumbent_cost = float(result["cost"][incumbent].item())
+            challenger = 1 - incumbent
+            challenger_cost = float(result["cost"][challenger].item())
+            # Asymmetric warm return: leaving the actor branch back to warm
+            # bypasses margin/dwell so the constructive warm hard floor is
+            # preserved step-by-step; hysteresis only smooths actor entry.
+            margin = (
+                0.0 if (warm_hard_return and challenger == 0) else switch_margin
+            )
+            dwell_gate = 0 if (warm_hard_return and challenger == 0) else min_dwell
+            if dwell >= dwell_gate and challenger_cost < incumbent_cost - margin:
+                selected_index = challenger
+                dwell = 0
+            else:
+                selected_index = incumbent
+                dwell += 1
+            guard_state["selected_index"] = selected_index
+            guard_state["dwell"] = dwell
+        selected_sequence = result["action_sequences"][selected_index]
+        result.update(
+            {
+                "selected_index": selected_index,
+                "selected_name": "warm_mppi" if selected_index == 0 else "proposal",
+                "selected_action_sequence": selected_sequence.detach(),
+                "selected_action": selected_sequence[0].detach(),
+                "selected_cost": result["cost"][selected_index].detach(),
+                "warm_cost": result["cost"][0].detach(),
+                "proposal_cost": result["cost"][1].detach(),
+            }
+        )
+        return result
+
     def __call__(
         self,
         initial_state,
@@ -230,14 +455,7 @@ class TorchMPPIController:
 
         last = None
         for _ in range(self.params.num_iterations):
-            noise = torch.randn(
-                self.params.num_samples,
-                self.params.num_knots,
-                self.params.action_dim,
-                generator=self._generator,
-                device=self.device,
-            ) * self._noise_sigma
-            noise[0].zero_()  # Always retain the current mean as a candidate.
+            noise = self._sample_knot_noise()
             sampling_mean_knots = mean_knots
             raw_sampled_knots = sampling_mean_knots[None, :, :] + noise
             sampled_knots = raw_sampled_knots
@@ -315,6 +533,7 @@ class TorchMPPIController:
             "weight": weight.detach(),
             "best_cost": cost[best_index].detach(),
             "effective_sample_size": (1.0 / weight.square().sum()).detach(),
+            "sampling_mode": self.params.sampling_mode,
         }
         full_trajectory = getattr(
             self.rollout_backend, "last_full_trajectory", None
