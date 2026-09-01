@@ -38,6 +38,10 @@ from car_foundation.query_deployment import (
     QueryHistoryBuffer,
     TorchQueryRolloutBackend,
 )
+from car_foundation.mppi_residual_actor_runtime import (
+    ResidualActorRuntime,
+    ResidualActorRuntimeConfig,
+)
 import numpy as np
 import tf2_geometry_msgs
 import datetime
@@ -169,6 +173,49 @@ class CarNode(Node):
             mppi_seed = int(
                 self.declare_parameter("mppi_seed", 3407).value
             )
+            mppi_sampling_mode = str(
+                self.declare_parameter("mppi_sampling_mode", "gaussian").value
+            )
+            self.mppi_hard_guard_checkpoint = str(
+                self.declare_parameter("mppi_hard_guard_checkpoint", "").value
+            ).strip()
+            self.mppi_hard_guard_first_seed = int(
+                self.declare_parameter("mppi_hard_guard_first_seed", 24001).value
+            )
+            self.mppi_hard_guard_switch_margin = float(
+                self.declare_parameter(
+                    "mppi_hard_guard_switch_margin", 0.0
+                ).value
+            )
+            self.mppi_hard_guard_min_dwell = int(
+                self.declare_parameter("mppi_hard_guard_min_dwell", 0).value
+            )
+            self.mppi_hard_guard_warm_hard_return = bool(
+                self.declare_parameter(
+                    "mppi_hard_guard_warm_hard_return", False
+                ).value
+            )
+            self._hard_guard_state = {"selected_index": 0, "dwell": 0}
+            self.mppi_reference_speed_max = float(
+                self.declare_parameter(
+                    "mppi_reference_speed_max", SAFE_SPEED_MAX
+                ).value
+            )
+            if not np.isfinite(self.mppi_reference_speed_max) or (
+                self.mppi_reference_speed_max <= 0.0
+            ):
+                raise ValueError("mppi_reference_speed_max must be finite and positive")
+            self.mppi_reference_speed = float(
+                self.declare_parameter("mppi_reference_speed", -1.0).value
+            )
+            if self.mppi_reference_speed < 0.0:
+                self.mppi_reference_speed = -1.0
+            elif self.mppi_reference_speed > self.mppi_reference_speed_max:
+                raise ValueError(
+                    "mppi_reference_speed must not exceed "
+                    "mppi_reference_speed_max="
+                    f"{self.mppi_reference_speed_max}"
+                )
             device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
             if backend_name == "pytorch":
                 deployment_model = QueryDeploymentModel.from_checkpoint(
@@ -218,6 +265,7 @@ class CarNode(Node):
                 num_samples=num_samples,
                 num_iterations=num_iterations,
                 seed=mppi_seed,
+                sampling_mode=mppi_sampling_mode,
             )
             if abs(self.control_dt - self.mppi_params.dt) > 1e-9:
                 raise ValueError(
@@ -227,13 +275,41 @@ class CarNode(Node):
             self.mppi = TorchMPPIController(
                 rollout_backend, self.mppi_params, device=device
             )
+            self.mppi_hard_guard_runtime = None
+            if self.mppi_hard_guard_checkpoint:
+                if backend_name != "dbm":
+                    raise ValueError(
+                        "The residual-Actor hard guard is qualified only for mppi_backend=dbm"
+                    )
+                if num_samples != 256 or mppi_sampling_mode != "gaussian":
+                    raise ValueError(
+                        "The qualified hard guard requires 256 Gaussian warm-MPPI candidates"
+                    )
+                self.mppi_hard_guard_runtime = ResidualActorRuntime(
+                    self.mppi_hard_guard_checkpoint,
+                    bc_checkpoint=os.path.join(
+                        repository_root,
+                        "outputs/mppi_proposal/bc_t1_conv_diverse_20260805_v1/trust1_seed1.pt",
+                    ),
+                    feedback_critic_dir=os.path.join(
+                        repository_root,
+                        "outputs/mppi_proposal/critic_two_pass_feedback_20260805_v1",
+                    ),
+                    config=ResidualActorRuntimeConfig(
+                        first_seed=self.mppi_hard_guard_first_seed
+                    ),
+                    device=device,
+                )
             self.mppi_running_params = self.mppi.get_init_state()
             self.query_history = QueryHistoryBuffer(dt=self.control_dt)
             self.get_logger().info(
                 f"Query MPPI backend={backend_name}, device={device}, "
                 f"dt={self.control_dt}, wheelbase="
                 f"{self.model_params.LF + self.model_params.LR}, "
-                f"samples={num_samples}"
+                f"samples={num_samples}, sampling_mode={mppi_sampling_mode}, "
+                "reference_speed_override="
+                f"{self.mppi_reference_speed}, hard_guard="
+                f"{bool(self.mppi_hard_guard_runtime)}"
             )
         elif self.controller_type == 'pure_persuit':
             ## Pure pursuit controller
@@ -348,6 +424,13 @@ class CarNode(Node):
 
     def _dataset_snapshot_due(self):
         if not self.mppi_dataset_dir:
+            return False
+        # Simulator metadata is part of the immutable snapshot contract.  ROS
+        # startup ordering is nondeterministic, so an immediate step-zero
+        # collection must wait for the metadata topic instead of persisting an
+        # unverifiable empty simulator record.  Continuous trace collection is
+        # intentionally not delayed.
+        if self.mppi_backend_name == "dbm" and self.simulator_metadata is None:
             return False
         start_step = max(0, self.mppi_dataset_start_step)
         if self._counter < start_step:
@@ -523,8 +606,16 @@ class CarNode(Node):
             FilePath(self.mppi_dataset_dir).expanduser().resolve()
             / self.mppi_dataset_episode_id
         )
-        if control_step == 0 and episode_root.exists() and any(
-            episode_root.iterdir()
+        # At step zero the same callback may have just written the first
+        # snapshot before appending its trace row.  In that case
+        # mppi_dataset_records is already nonempty and the files belong to this
+        # live episode, not to a previous run.  Preserve the refusal for every
+        # genuinely pre-existing nonempty episode.
+        if (
+            control_step == 0
+            and not self.mppi_dataset_records
+            and episode_root.exists()
+            and any(episode_root.iterdir())
         ):
             raise FileExistsError(
                 f"Refusing to overwrite existing dataset episode: {episode_root}"
@@ -566,6 +657,22 @@ class CarNode(Node):
             },
             "controller_duration_s": float(duration_sec),
         }
+        guard = mppi_info.get("hard_guard")
+        if guard is not None:
+            record["hard_guard"] = {
+                "selected": guard["selected_name"],
+                "selected_index": int(guard["selected_index"]),
+                "warm_cost": float(guard["warm_cost"]),
+                "proposal_cost": float(guard["proposal_cost"]),
+                "selected_cost": float(guard["selected_cost"]),
+                "actor_runtime_duration_s": float(
+                    guard["actor_runtime_duration_s"]
+                ),
+                "actor_first_pass_rollouts": int(
+                    guard["actor_first_pass_rollouts"]
+                ),
+                "strict_total_rollouts": 387,
+            }
         with trace_path.open("a") as stream:
             stream.write(json.dumps(record, separators=(",", ":")) + "\n")
 
@@ -614,6 +721,16 @@ class CarNode(Node):
                     "stop_step": self.mppi_dataset_stop_step,
                     "stride": self.mppi_dataset_stride,
                     "max_snapshots": self.mppi_dataset_max_snapshots,
+                    "reference_speed_override_mps": self.mppi_reference_speed,
+                    "reference_speed_max_mps": self.mppi_reference_speed_max,
+                    "hard_guard": {
+                        "enabled": bool(self.mppi_hard_guard_runtime),
+                        "checkpoint": self.mppi_hard_guard_checkpoint,
+                        "first_seed": self.mppi_hard_guard_first_seed,
+                        "strict_rollouts_per_step": (
+                            387 if self.mppi_hard_guard_runtime else 256
+                        ),
+                    },
                     "cost_independent_payload": (
                         "candidate actions, raw/clipped knots, sampling noise, "
                         "DBM trajectories, and unweighted per-step error features"
@@ -754,6 +871,9 @@ class CarNode(Node):
                 if self.mppi_backend_name == "dbm"
                 else "{}"
             ),
+            reference_speed_override_mps=np.asarray(
+                self.mppi_reference_speed, dtype=np.float32
+            ),
             **{f"cost_{name}": value for name, value in components.items()},
             **raw_features,
         )
@@ -821,6 +941,7 @@ class CarNode(Node):
                     self._counter >= self.mppi_params.history_length
                 ),
                 "track": str(FilePath(self.track_path).resolve()),
+                "reference_speed_override_mps": self.mppi_reference_speed,
                 "frenet_s_m": float(frenet_pose.s),
                 "frenet_lateral_m": float(frenet_pose.t),
                 "frenet_heading_error_rad": float(frenet_pose.xi),
@@ -939,9 +1060,19 @@ class CarNode(Node):
         # print("State", state)
         ## Generate reference trajectory
         target_pos_arr, frenet_pose = self.global_planner.generate(
-            state[:5], self.control_dt, self.mppi_params.horizon + 1, True
+            state[:5],
+            self.control_dt,
+            self.mppi_params.horizon + 1,
+            True,
+            target_speed_override=(
+                self.mppi_reference_speed
+                if self.mppi_reference_speed >= 0.0
+                else None
+            ),
         )
-        target_pos_arr[:, 3] = np.clip(target_pos_arr[:, 3], 0.0, SAFE_SPEED_MAX)
+        target_pos_arr[:, 3] = np.clip(
+            target_pos_arr[:, 3], 0.0, self.mppi_reference_speed_max
+        )
         target_pos_list = np.array(target_pos_arr)
 
 
@@ -956,9 +1087,22 @@ class CarNode(Node):
             snapshot_targets = self._snapshot_targets()
             snapshot_this_step = bool(snapshot_targets)
             trace_this_step = self._dataset_trace_due()
-            if snapshot_this_step or trace_this_step:
+            if snapshot_this_step or trace_this_step or self.mppi_hard_guard_runtime:
                 mean_knots_before = self.mppi_running_params.mean_knots.detach().clone()
                 current_action_before = self.prev_action.copy()
+            actor_runtime_output = None
+            if self.mppi_hard_guard_runtime is not None:
+                actor_runtime_output = self.mppi_hard_guard_runtime.propose(
+                    self.mppi,
+                    query_state,
+                    self.prev_action,
+                    mppi_history,
+                    target_pos_arr,
+                    mean_knots_before,
+                    reference_ego=self._reference_in_ego_frame(
+                        target_pos_arr, state
+                    ),
+                )
             if snapshot_this_step:
                 rng_state_before = self.mppi._generator.get_state().detach().clone()
             action, self.mppi_running_params, mppi_info = self.mppi(
@@ -969,6 +1113,40 @@ class CarNode(Node):
                 self.mppi_running_params,
             )
             action = action.cpu().numpy().astype(np.float32)
+            if actor_runtime_output is not None:
+                guard = self.mppi.hard_guard_action_sequence(
+                    query_state,
+                    self.prev_action,
+                    mppi_history,
+                    target_pos_arr,
+                    mppi_info["optimized_action_sequence"],
+                    actor_runtime_output.action_sequence,
+                    guard_state=(
+                        self._hard_guard_state
+                        if (
+                            self.mppi_hard_guard_switch_margin > 0.0
+                            or self.mppi_hard_guard_min_dwell > 0
+                        )
+                        else None
+                    ),
+                    switch_margin=self.mppi_hard_guard_switch_margin,
+                    min_dwell=self.mppi_hard_guard_min_dwell,
+                    warm_hard_return=self.mppi_hard_guard_warm_hard_return,
+                )
+                action = guard["selected_action"].cpu().numpy().astype(np.float32)
+                mppi_info["hard_guard"] = {
+                    "selected_name": guard["selected_name"],
+                    "selected_index": guard["selected_index"],
+                    "warm_cost": guard["warm_cost"].cpu(),
+                    "proposal_cost": guard["proposal_cost"].cpu(),
+                    "selected_cost": guard["selected_cost"].cpu(),
+                    "selected_action_sequence": guard[
+                        "selected_action_sequence"
+                    ].cpu(),
+                    "actor_center_knots": actor_runtime_output.center_knots.cpu(),
+                    "actor_runtime_duration_s": actor_runtime_output.duration_s,
+                    "actor_first_pass_rollouts": actor_runtime_output.rollout_count,
+                }
             controller_action = action.copy()
             if snapshot_this_step:
                 for snapshot_target in snapshot_targets:
@@ -987,7 +1165,9 @@ class CarNode(Node):
                         snapshot_target,
                     )
             action_candidate_np = (
-                mppi_info["optimized_action_sequence"].cpu().numpy()
+                mppi_info["hard_guard"]["selected_action_sequence"].numpy()
+                if "hard_guard" in mppi_info
+                else mppi_info["optimized_action_sequence"].cpu().numpy()
             )
             sampled_traj = mppi_info["trajectory"][:, :2].cpu().numpy()
             controller_duration_sec = time.time() - _ctr_start

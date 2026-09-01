@@ -146,6 +146,42 @@ def validate_snapshot(path: Path, manifest: dict) -> dict:
             if not np.isfinite(data[name]).all():
                 raise AssertionError(f"{path}: {name} contains NaN/Inf")
 
+        if "reference_speed_override_mps" in data.files:
+            speed_override = float(data["reference_speed_override_mps"])
+            manifest_override = float(
+                manifest["collection"]["reference_speed_override_mps"]
+            )
+            if not np.isclose(speed_override, manifest_override, atol=1e-6):
+                raise AssertionError(
+                    f"{path}: reference speed override differs from manifest"
+                )
+            if speed_override >= 0.0 and not np.allclose(
+                data["reference"][:, 3], speed_override, atol=1e-5
+            ):
+                raise AssertionError(
+                    f"{path}: reference does not use the configured speed override"
+                )
+            if speed_override > 0.0:
+                progress_speed = float(
+                    np.linalg.norm(
+                        np.diff(data["reference"][:, :2], axis=0), axis=1
+                    ).mean()
+                    / float(params["dt"])
+                )
+                if not np.isclose(
+                    progress_speed,
+                    speed_override,
+                    # The planner's periodic spline parameterization is only
+                    # approximately arc length, so Cartesian progress varies
+                    # by track phase even with a constant ds/dt command.
+                    rtol=0.20,
+                    atol=0.05,
+                ):
+                    raise AssertionError(
+                        f"{path}: reference position progression implies "
+                        f"{progress_speed:.3f} m/s, expected {speed_override:.3f}"
+                    )
+
         assert_close(
             "raw knots",
             data["raw_sampled_knots"],

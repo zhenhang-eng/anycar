@@ -41,6 +41,25 @@ def generate_launch_description():
         "mppi_dataset_shutdown_on_complete"
     )
     mppi_seed = LaunchConfiguration("mppi_seed")
+    mppi_num_samples = LaunchConfiguration("mppi_num_samples")
+    mppi_sampling_mode = LaunchConfiguration("mppi_sampling_mode")
+    mppi_reference_speed = LaunchConfiguration("mppi_reference_speed")
+    mppi_reference_speed_max = LaunchConfiguration("mppi_reference_speed_max")
+    mppi_hard_guard_checkpoint = LaunchConfiguration(
+        "mppi_hard_guard_checkpoint"
+    )
+    mppi_hard_guard_first_seed = LaunchConfiguration(
+        "mppi_hard_guard_first_seed"
+    )
+    mppi_hard_guard_switch_margin = LaunchConfiguration(
+        "mppi_hard_guard_switch_margin"
+    )
+    mppi_hard_guard_min_dwell = LaunchConfiguration(
+        "mppi_hard_guard_min_dwell"
+    )
+    mppi_hard_guard_warm_hard_return = LaunchConfiguration(
+        "mppi_hard_guard_warm_hard_return"
+    )
     sim_initial_state = LaunchConfiguration("sim_initial_state")
     repository_root = os.environ.get("CAR_PATH", "/home/plusai/anycar")
     declare_mppi_backend_cmd = DeclareLaunchArgument(
@@ -114,6 +133,70 @@ def generate_launch_description():
         default_value="3407",
         description="Reproducible Torch MPPI sampling seed",
     )
+    declare_mppi_num_samples_cmd = DeclareLaunchArgument(
+        "mppi_num_samples",
+        default_value="256",
+        description="MPPI candidate count per controller step",
+    )
+    declare_mppi_sampling_mode_cmd = DeclareLaunchArgument(
+        "mppi_sampling_mode",
+        default_value="gaussian",
+        description=(
+            "MPPI knot sampling: gaussian or fixed_hadamard_64; the fixed "
+            "mode requires mppi_num_samples=64"
+        ),
+    )
+    declare_mppi_reference_speed_cmd = DeclareLaunchArgument(
+        "mppi_reference_speed",
+        default_value="-1.0",
+        description=(
+            "Reference speed override in m/s; a negative value preserves the "
+            "track speed"
+        ),
+    )
+    declare_mppi_reference_speed_max_cmd = DeclareLaunchArgument(
+        "mppi_reference_speed_max",
+        default_value="10.0",
+        description=(
+            "Explicit reference-speed ceiling in m/s. The default preserves "
+            "the normal runtime limit; isolated synthetic high-speed data "
+            "collection must opt in to a larger value."
+        ),
+    )
+    declare_mppi_hard_guard_checkpoint_cmd = DeclareLaunchArgument(
+        "mppi_hard_guard_checkpoint",
+        default_value="",
+        description=(
+            "Optional residual Actor checkpoint for the DBM baseline-preserving "
+            "hard guard; empty keeps the original controller"
+        ),
+    )
+    declare_mppi_hard_guard_first_seed_cmd = DeclareLaunchArgument(
+        "mppi_hard_guard_first_seed",
+        default_value="24001",
+        description="Frozen 129-rollout Actor-context first-pass seed",
+    )
+    declare_mppi_hard_guard_switch_margin_cmd = DeclareLaunchArgument(
+        "mppi_hard_guard_switch_margin",
+        default_value="0.0",
+        description=(
+            "Guard hysteresis: challenger must undercut the incumbent branch "
+            "model cost by more than this margin before a switch is allowed"
+        ),
+    )
+    declare_mppi_hard_guard_min_dwell_cmd = DeclareLaunchArgument(
+        "mppi_hard_guard_min_dwell",
+        default_value="0",
+        description="Guard hysteresis: minimum incumbent dwell steps per branch",
+    )
+    declare_mppi_hard_guard_warm_hard_return_cmd = DeclareLaunchArgument(
+        "mppi_hard_guard_warm_hard_return",
+        default_value="false",
+        description=(
+            "Asymmetric guard hysteresis: returning to the warm branch "
+            "bypasses margin/dwell so the warm hard floor holds step-by-step"
+        ),
+    )
     declare_sim_initial_state_cmd = DeclareLaunchArgument(
         "sim_initial_state",
         default_value="0,0,0,0,0,0",
@@ -130,6 +213,29 @@ def generate_launch_description():
                 "step_mode": True,
                 "mppi_backend": mppi_backend,
                 "mppi_seed": ParameterValue(mppi_seed, value_type=int),
+                "mppi_num_samples": ParameterValue(
+                    mppi_num_samples, value_type=int
+                ),
+                "mppi_sampling_mode": mppi_sampling_mode,
+                "mppi_reference_speed": ParameterValue(
+                    mppi_reference_speed, value_type=float
+                ),
+                "mppi_reference_speed_max": ParameterValue(
+                    mppi_reference_speed_max, value_type=float
+                ),
+                "mppi_hard_guard_checkpoint": mppi_hard_guard_checkpoint,
+                "mppi_hard_guard_first_seed": ParameterValue(
+                    mppi_hard_guard_first_seed, value_type=int
+                ),
+                "mppi_hard_guard_switch_margin": ParameterValue(
+                    mppi_hard_guard_switch_margin, value_type=float
+                ),
+                "mppi_hard_guard_min_dwell": ParameterValue(
+                    mppi_hard_guard_min_dwell, value_type=int
+                ),
+                "mppi_hard_guard_warm_hard_return": ParameterValue(
+                    mppi_hard_guard_warm_hard_return, value_type=bool
+                ),
                 "query_checkpoint": query_checkpoint,
                 "query_onnx_path": query_onnx_path,
                 "mppi_snapshot_step": ParameterValue(
@@ -180,6 +286,15 @@ def generate_launch_description():
             declare_use_sim_time_cmd,
             declare_mppi_backend_cmd,
             declare_mppi_seed_cmd,
+            declare_mppi_num_samples_cmd,
+            declare_mppi_sampling_mode_cmd,
+            declare_mppi_reference_speed_cmd,
+            declare_mppi_reference_speed_max_cmd,
+            declare_mppi_hard_guard_checkpoint_cmd,
+            declare_mppi_hard_guard_first_seed_cmd,
+            declare_mppi_hard_guard_switch_margin_cmd,
+            declare_mppi_hard_guard_min_dwell_cmd,
+            declare_mppi_hard_guard_warm_hard_return_cmd,
             declare_query_checkpoint_cmd,
             declare_query_onnx_path_cmd,
             declare_mppi_snapshot_step_cmd,

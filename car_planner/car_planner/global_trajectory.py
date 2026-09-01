@@ -289,7 +289,14 @@ class GlobalTrajectory:
     def get_total_length(self):
         return self.total_length_
 
-    def generate(self, obs: np.ndarray, dt: float, h: int, return_frenet_pose = False) -> np.ndarray:
+    def generate(
+        self,
+        obs: np.ndarray,
+        dt: float,
+        h: int,
+        return_frenet_pose=False,
+        target_speed_override=None,
+    ) -> np.ndarray:
         # TODO: accept a list of vels
         st = time.time()
         pos2d = obs[:2]
@@ -308,10 +315,18 @@ class GlobalTrajectory:
         vel_intp = np.zeros(h)
         s = np.zeros(h)
         s[0] = p0.s
-        vel_intp[0] = self.speed_intp_(s[0])
+        vel_intp[0] = (
+            float(target_speed_override)
+            if target_speed_override is not None
+            else self.speed_intp_(s[0])
+        )
         for i in range(1, h):
             s[i] = s[i - 1] + vel_intp[i - 1] * dt
-            vel_intp[i] = self.speed_intp_(s[i])
+            vel_intp[i] = (
+                float(target_speed_override)
+                if target_speed_override is not None
+                else self.speed_intp_(s[i])
+            )
         x = self.get_x_intp_function()(s)
         y = self.get_y_intp_function()(s)
         yaw = self.get_spline_yaw_intp_function()(s)
