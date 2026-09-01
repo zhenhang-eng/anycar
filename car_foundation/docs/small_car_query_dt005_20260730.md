@@ -231,3 +231,20 @@ python scripts/model_verify/evaluate_mppi_sampling_snapshot.py \
 
 运行时也可以通过 `mppi_snapshot_step` 和 `mppi_snapshot_dir` 在其他控制步截取相同
 格式的快照；默认 `mppi_snapshot_step=-1`，不会写文件，也不改变 Quick Start 行为。
+
+## 40--100 km/h 使用边界补充（2026-08-31）
+
+本模型的训练数据不是高速数据：1024个确定性DBM episode的目标速度最高约`3.5 m/s`，训练PKL实际
+`vx`最高`3.098 m/s`、P95 `2.460 m/s`。当前高速度Replay实测`vx`为`7.796--30.626 m/s`，全部超过
+训练上限；使用checkpoint固定统计后，速度相关输入达到约26个标准差中位、43--44个标准差P95。
+车辆参数、20 Hz时间基准、动作顺序/范围、250步history和50步horizon均匹配，所以这是训练域外推，
+不是接口接错。
+
+当前高速度Replay还只保存每episode最初5个控制步，250步history主要由恒速prime构成，历史动作99.2%
+精确为0；它不代表成熟闭环中的完整12.5秒历史。冻结Query若被直接定义为后续环境，这些差异无需解释为
+相对DBM的模型误差，但必须先验证高速度PyTorch/ONNX数值一致、输出/cost有限且可复算，并将prime-history
+与mature-history作为不同输入合同。完整审计见review §11.145及：
+
+```text
+outputs/query_mppi/highspeed_query_domain_audit_20260831_v3/
+```

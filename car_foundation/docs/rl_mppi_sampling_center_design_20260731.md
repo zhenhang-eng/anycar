@@ -1,3 +1,5 @@
+> **[CLOSED-HISTORY 2026-08-20]** 本文档记录的路线已关闭/被取代。权威结论见 `mppi_sampling_center_review_20260812.md` §11.80。本文档不再更新，仅作历史参考。
+
 # 用强化学习生成 MPPI 采样中心：设计与实施方案
 
 更新时间：2026-08-02。
@@ -881,6 +883,19 @@ T0/T1 teacher 的标签定义、计划和当前结果见
 完成这一版后，再决定是否开发读取第一轮采样集合的 learned updater。相比直接做
 整圈 PPO、直接学习 covariance 或让 RL 直接控制车辆，这条路径更容易验证每一步
 究竟带来了什么收益，也最符合当前 PyTorch/ONNX MPPI 的接口和安全边界。
+
+### 20.1 2026-08-07 当前设计覆盖
+
+上面的 T0/T1/BC 文字是历史路线。当前 deterministic Direct Actor 已完成独立状态扩充、
+J16/local-curvature supervision 和两轮 actor-visited 诊断；当前阻塞项是 2.4--2.8 m/s
+的状态相关更新步长与 tail，而不是是否开始整圈 PPO。
+
+下一步采用
+[forward-rollout deterministic TRPO-like policy iteration](mppi_direct_actor_trpo_like_design_20260807.md)：
+在固定协方差解释下，以 source-MPPI sigma 归一化中心距离作为 KL trust-region 代理；
+用 DBM/Query forward direct cost 做逐状态 line search 和 safe target，再训练相同的唯一
+输出 Actor。这不是标准 TRPO，不使用 likelihood ratio、Fisher/natural gradient、随机
+reward 或 DBM 解析梯度。
 
 ## 21. 术语表
 
