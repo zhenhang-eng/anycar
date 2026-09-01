@@ -310,3 +310,6 @@ model_checkpoint*.zip
 car_ws/install
 car_ws/build
 car_ws/log
+
+# AI assistant session workspace
+.qoder/
