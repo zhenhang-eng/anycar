@@ -515,13 +515,16 @@ def write_markdown_summary(
     source: Path,
     splits: dict[str, list[str]],
     config_summary: dict[str, Any],
+    candidate_counts: list[int],
 ) -> None:
+    candidate_count_text = ", ".join(str(value) for value in candidate_counts)
     lines = [
         "# DBM proposal teacher T0 summary",
         "",
         f"- Source: `{source}`",
         f"- Generator: `{GENERATOR_ID}`",
-        "- T0 reuses saved 256-candidate DBM rollouts; no new dynamics rollout was run.",
+        f"- T0 reuses saved DBM rollouts ({candidate_count_text} candidates per snapshot); "
+        "no new dynamics rollout was run.",
         "- Primary BC target: `soft_teacher_delta_knots`.",
         "- The soft-center trajectory cost is not evaluated at T0; "
         "`soft_weighted_candidate_cost` is only an expectation over saved candidates.",
@@ -586,19 +589,25 @@ def main() -> None:
             {
                 "format_version": FORMAT_VERSION,
                 "policy": "episode-level final-sorted holdout",
-                "warning": "Pipeline split only; eight episodes are insufficient for a final generalization claim.",
+                "warning": (
+                    f"Episode-level split over {len(episodes)} source episodes; "
+                    "preserve this split for all controlled comparisons and do not "
+                    "randomly split adjacent snapshots."
+                ),
                 **splits,
             },
         )
         shutil.copy2(config_path, staging / "cost_configs.json")
         rows: list[dict[str, Any]] = []
         source_index: list[dict[str, Any]] = []
+        candidate_count_set: set[int] = set()
         for index, record in enumerate(records, start=1):
             split = split_for_episode(splits, record["episode_id"])
             source_hash = sha256_file(record["path"])
             arrays, metadata, snapshot_rows = process_snapshot(
                 record, configs, split, source_hash
             )
+            candidate_count_set.add(int(metadata["candidate_count"]))
             episode_output = staging / record["episode_id"]
             episode_output.mkdir(exist_ok=True)
             stem = f"step_{record['control_step']:06d}"
@@ -620,6 +629,7 @@ def main() -> None:
             writer.writeheader()
             writer.writerows(rows)
         config_summary = aggregate_summary(rows, configs)
+        candidate_counts = sorted(candidate_count_set)
         write_json(
             staging / "summary.json",
             {
@@ -628,11 +638,16 @@ def main() -> None:
                 "source_collection": str(source),
                 "snapshot_count": len(records),
                 "label_row_count": len(rows),
+                "candidate_counts_per_snapshot": candidate_counts,
                 "config_summary": config_summary,
             },
         )
         write_markdown_summary(
-            staging / "COLLECTION_SUMMARY.md", source, splits, config_summary
+            staging / "COLLECTION_SUMMARY.md",
+            source,
+            splits,
+            config_summary,
+            candidate_counts,
         )
         source_fingerprint = hashlib.sha256(
             "\n".join(
@@ -662,7 +677,9 @@ def main() -> None:
                 "primary_supervision_target": "soft_teacher_delta_knots",
                 "alternative_supervision_target": "best_teacher_delta_knots",
                 "limitations": [
-                    "T0 searches only the 256 candidates already stored per snapshot.",
+                    "T0 searches only the "
+                    + ", ".join(str(value) for value in candidate_counts)
+                    + " candidates already stored per snapshot.",
                     "The soft weighted center is not rolled out; its exact DBM cost is unavailable at T0.",
                     "The episode split is suitable for pipeline development, not a final generalization claim.",
                 ],

@@ -208,11 +208,20 @@ def validate_label(
         warm = np.asarray(source["sampling_mean_knots"], dtype=np.float64)
         shortlist = np.asarray(label["shortlist_centers"], dtype=np.float64)
         names = list(label["shortlist_center_names"].astype(str))
-        shortlist_count = int(config["search"]["shortlist_count"])
+        configured_shortlist_count = int(config["search"]["shortlist_count"])
+        shortlist_count = int(shortlist.shape[0])
         seed_count = len(config["proposal_evaluation"]["seeds"])
         sample_count = int(config["proposal_evaluation"]["num_samples"])
+        # Search centers are intentionally de-duplicated.  In degenerate states
+        # several CEM starts/stages can converge to exactly the same knots, so
+        # the stored shortlist may legitimately contain fewer than the
+        # configured maximum while still retaining every required start.
+        if not 1 <= shortlist_count <= configured_shortlist_count:
+            raise AssertionError(f"{label_path}: invalid shortlist count")
         if shortlist.shape != (shortlist_count, 8, 2):
             raise AssertionError(f"{label_path}: invalid shortlist shape")
+        if len(names) != shortlist_count:
+            raise AssertionError(f"{label_path}: shortlist names/count differ")
         if label["proposal_candidate_cost"].shape != (
             shortlist_count,
             seed_count,
@@ -261,8 +270,23 @@ def validate_label(
             assert_close(f"score component {name}", label[f"score_component_{name}"], values)
             expected_score += float(config["selection_score"][name]) * values
         assert_close("selection score", label["selection_score"], expected_score)
-        if teacher_index != int(np.argmin(expected_score)):
-            raise AssertionError(f"{label_path}: teacher does not minimize selection score")
+        # The generator selects from the stored float32 score.  Recombining the
+        # stored float32 components here in float64 can reverse the order of
+        # numerically tied, nearly identical centers by a few 1e-7.  Require
+        # the selected score to attain the minimum within the same tolerance
+        # used for the score arithmetic instead of requiring an identical
+        # argmin index.
+        minimum_score = float(np.min(expected_score))
+        if not np.isclose(
+            float(expected_score[teacher_index]),
+            minimum_score,
+            rtol=3e-4,
+            atol=3e-4,
+        ):
+            gap = float(expected_score[teacher_index] - minimum_score)
+            raise AssertionError(
+                f"{label_path}: teacher does not minimize selection score; gap={gap}"
+            )
         assert_close("teacher center", label["teacher_center_knots"], shortlist[teacher_index])
         assert_close(
             "teacher delta", label["teacher_delta_knots"], shortlist[teacher_index] - warm

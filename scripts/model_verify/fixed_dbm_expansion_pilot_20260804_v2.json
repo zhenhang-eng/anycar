@@ -1,0 +1,45 @@
+{
+  "format_version": 1,
+  "description": "Corrected fixed-DBM speed expansion pilot; reference position progression and the reference velocity channel use the same override.",
+  "collection_dir": "/disk/collect_data_from_anycar/mppi_rl_closed_loop/fixed_dbm_expansion_pilot_20260804_v2",
+  "collection": {
+    "start_step": 250,
+    "stride": 12,
+    "max_snapshots": 20,
+    "trace_start_step": 0,
+    "num_samples": 256,
+    "num_iterations": 1
+  },
+  "episodes": [
+    {
+      "episode_id": "episode_000",
+      "track_index": 31,
+      "lateral_offset_m": 0.0,
+      "heading_error_rad": 0.0,
+      "reference_speed_mps": 1.4,
+      "initial_state": "1.169901,-0.253181,-0.110314,1.400000,0.000000,0.000000",
+      "mppi_seed": 4500,
+      "scenario_class": "steady"
+    },
+    {
+      "episode_id": "episode_001",
+      "track_index": 409,
+      "lateral_offset_m": 0.24,
+      "heading_error_rad": -0.18,
+      "reference_speed_mps": 2.0,
+      "initial_state": "6.460269,9.554799,2.120683,0.800000,0.050000,-0.300000",
+      "mppi_seed": 4501,
+      "scenario_class": "recovery"
+    },
+    {
+      "episode_id": "episode_002",
+      "track_index": 661,
+      "lateral_offset_m": -0.22,
+      "heading_error_rad": -0.18,
+      "reference_speed_mps": 2.6,
+      "initial_state": "2.446727,3.719773,-2.806833,1.500000,-0.050000,0.300000",
+      "mppi_seed": 4502,
+      "scenario_class": "recovery"
+    }
+  ]
+}

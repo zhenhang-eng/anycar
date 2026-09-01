@@ -1,0 +1,55 @@
+{
+  "format_version": 1,
+  "description": "Reduced-budget T1 teacher for the 120-episode diverse fixed-DBM collection. It trades repeated rollout depth for state coverage while retaining multi-start CEM and disjoint audit seeds.",
+  "objective": {
+    "temperature": 1.0,
+    "cost_weights": {
+      "position": 5.0,
+      "yaw": 5.0,
+      "vx": 1.0,
+      "yawrate": 0.0,
+      "acceleration_rate": 0.05,
+      "steering_rate": 0.1
+    }
+  },
+  "search": {
+    "initial_centers": [
+      "warm",
+      "t0_best",
+      "t0_soft"
+    ],
+    "seeds": [
+      19101,
+      19102
+    ],
+    "stage_samples": 64,
+    "sigma_scales": [
+      1.0,
+      0.4,
+      0.15
+    ],
+    "elite_fraction": 0.1,
+    "elite_temperature_floor": 0.25,
+    "shortlist_count": 5
+  },
+  "proposal_evaluation": {
+    "seeds": [
+      19201,
+      19202
+    ],
+    "audit_seeds": [
+      19301,
+      19302
+    ],
+    "num_samples": 64,
+    "sigma_scale": 1.0
+  },
+  "selection_score": {
+    "weighted_output_cost_mean": 1.0,
+    "weighted_output_cost_std": 0.25,
+    "p10_cost_mean": 0.1,
+    "softmin_cost_mean": 0.05,
+    "center_shift_standardized_rms": 0.1,
+    "boundary_fraction": 1.0
+  }
+}

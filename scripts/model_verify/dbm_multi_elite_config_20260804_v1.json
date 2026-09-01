@@ -1,0 +1,11 @@
+{
+  "format_version": 1,
+  "description": "Derive up to four diverse, stable elite proposal centers from the validated expanded T1 shortlist without modifying the source collection or T1 labels.",
+  "max_elites": 4,
+  "minimum_seed_wins_vs_warm": 2,
+  "minimum_standardized_center_distance": 0.2,
+  "maximum_weighted_output_cost_gap_from_teacher": 2.0,
+  "weighted_output_cost_epsilon": 1e-6,
+  "ordering": "teacher_first_then_selection_score",
+  "padding": "warm_center_with_invalid_mask"
+}

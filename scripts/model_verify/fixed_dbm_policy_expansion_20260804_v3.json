@@ -1,0 +1,350 @@
+{
+  "format_version": 1,
+  "description": "Training-grade fixed-DBM policy expansion with stratified speed, track phase, tracking-error, and recovery-state coverage. Episode IDs are ordered train/validation/test for T0 split generation with counts 6/6.",
+  "collection_dir": "/disk/collect_data_from_anycar/mppi_rl_closed_loop/fixed_dbm_policy_expansion_20260804_v3",
+  "collection": {
+    "start_step": 250,
+    "stride": 12,
+    "max_snapshots": 20,
+    "trace_start_step": 0,
+    "num_samples": 256,
+    "num_iterations": 1
+  },
+  "split_counts": {
+    "train": 18,
+    "validation": 6,
+    "test": 6
+  },
+  "episodes": [
+    {
+      "episode_id": "episode_000",
+      "split": "train",
+      "scenario_class": "steady",
+      "track_index": 13,
+      "lateral_offset_m": 0.0,
+      "heading_error_rad": 0.0,
+      "reference_speed_mps": 1.4,
+      "initial_state": "0.595814,-0.074396,-0.558111,1.400000,0.000000,0.000000",
+      "mppi_seed": 4600
+    },
+    {
+      "episode_id": "episode_001",
+      "split": "train",
+      "scenario_class": "cold_start",
+      "track_index": 86,
+      "lateral_offset_m": 0.08,
+      "heading_error_rad": -0.06,
+      "reference_speed_mps": 1.4,
+      "initial_state": "4.233248,-0.091487,-0.087307,0.000000,0.000000,0.000000",
+      "mppi_seed": 4601
+    },
+    {
+      "episode_id": "episode_002",
+      "split": "train",
+      "scenario_class": "moderate_left",
+      "track_index": 159,
+      "lateral_offset_m": -0.12,
+      "heading_error_rad": 0.08,
+      "reference_speed_mps": 1.4,
+      "initial_state": "8.402100,-0.464232,0.219866,0.600000,0.000000,0.000000",
+      "mppi_seed": 4602
+    },
+    {
+      "episode_id": "episode_003",
+      "split": "train",
+      "scenario_class": "moderate_right",
+      "track_index": 232,
+      "lateral_offset_m": 0.16,
+      "heading_error_rad": 0.12,
+      "reference_speed_mps": 1.4,
+      "initial_state": "9.555222,2.084825,2.277624,1.800000,0.000000,0.000000",
+      "mppi_seed": 4603
+    },
+    {
+      "episode_id": "episode_004",
+      "split": "train",
+      "scenario_class": "large_left",
+      "track_index": 305,
+      "lateral_offset_m": -0.18,
+      "heading_error_rad": -0.14,
+      "reference_speed_mps": 1.4,
+      "initial_state": "9.228493,5.432689,1.161882,1.400000,-0.030000,0.180000",
+      "mppi_seed": 4604
+    },
+    {
+      "episode_id": "episode_005",
+      "split": "train",
+      "scenario_class": "recovery",
+      "track_index": 378,
+      "lateral_offset_m": 0.22,
+      "heading_error_rad": -0.18,
+      "reference_speed_mps": 1.4,
+      "initial_state": "7.521038,8.284023,2.067146,0.600000,0.050000,-0.300000",
+      "mppi_seed": 4605
+    },
+    {
+      "episode_id": "episode_006",
+      "split": "train",
+      "scenario_class": "steady",
+      "track_index": 451,
+      "lateral_offset_m": 0.0,
+      "heading_error_rad": 0.0,
+      "reference_speed_mps": 2.0,
+      "initial_state": "5.051421,10.750695,2.962885,2.000000,0.000000,0.000000",
+      "mppi_seed": 4606
+    },
+    {
+      "episode_id": "episode_007",
+      "split": "train",
+      "scenario_class": "cold_start",
+      "track_index": 524,
+      "lateral_offset_m": -0.08,
+      "heading_error_rad": 0.06,
+      "reference_speed_mps": 2.0,
+      "initial_state": "1.707335,8.787960,-1.700370,0.000000,0.000000,0.000000",
+      "mppi_seed": 4607
+    },
+    {
+      "episode_id": "episode_008",
+      "split": "train",
+      "scenario_class": "moderate_left",
+      "track_index": 597,
+      "lateral_offset_m": 0.12,
+      "heading_error_rad": -0.08,
+      "reference_speed_mps": 2.0,
+      "initial_state": "3.247999,5.901216,-0.905984,1.200000,0.000000,0.000000",
+      "mppi_seed": 4608
+    },
+    {
+      "episode_id": "episode_009",
+      "split": "train",
+      "scenario_class": "moderate_right",
+      "track_index": 670,
+      "lateral_offset_m": -0.16,
+      "heading_error_rad": -0.12,
+      "reference_speed_mps": 2.0,
+      "initial_state": "2.049387,3.435687,-2.774265,2.400000,0.000000,0.000000",
+      "mppi_seed": 4609
+    },
+    {
+      "episode_id": "episode_010",
+      "split": "train",
+      "scenario_class": "large_left",
+      "track_index": 743,
+      "lateral_offset_m": 0.18,
+      "heading_error_rad": 0.14,
+      "reference_speed_mps": 2.0,
+      "initial_state": "0.291786,0.621132,-1.064986,2.000000,-0.030000,0.180000",
+      "mppi_seed": 4610
+    },
+    {
+      "episode_id": "episode_011",
+      "split": "train",
+      "scenario_class": "recovery",
+      "track_index": 64,
+      "lateral_offset_m": -0.22,
+      "heading_error_rad": 0.18,
+      "reference_speed_mps": 2.0,
+      "initial_state": "2.762609,-0.425122,0.242584,1.200000,0.050000,-0.300000",
+      "mppi_seed": 4611
+    },
+    {
+      "episode_id": "episode_012",
+      "split": "train",
+      "scenario_class": "steady",
+      "track_index": 137,
+      "lateral_offset_m": 0.0,
+      "heading_error_rad": 0.0,
+      "reference_speed_mps": 2.6,
+      "initial_state": "7.153925,-0.396899,-0.030836,2.600000,0.000000,0.000000",
+      "mppi_seed": 4612
+    },
+    {
+      "episode_id": "episode_013",
+      "split": "train",
+      "scenario_class": "cold_start",
+      "track_index": 210,
+      "lateral_offset_m": 0.08,
+      "heading_error_rad": -0.06,
+      "reference_speed_mps": 2.6,
+      "initial_state": "9.952276,1.049169,1.460856,0.000000,0.000000,0.000000",
+      "mppi_seed": 4613
+    },
+    {
+      "episode_id": "episode_014",
+      "split": "train",
+      "scenario_class": "moderate_left",
+      "track_index": 283,
+      "lateral_offset_m": -0.12,
+      "heading_error_rad": 0.08,
+      "reference_speed_mps": 2.6,
+      "initial_state": "8.855534,4.332525,1.462061,1.800000,0.000000,0.000000",
+      "mppi_seed": 4614
+    },
+    {
+      "episode_id": "episode_015",
+      "split": "train",
+      "scenario_class": "moderate_right",
+      "track_index": 356,
+      "lateral_offset_m": 0.16,
+      "heading_error_rad": 0.12,
+      "reference_speed_mps": 2.6,
+      "initial_state": "8.212050,7.488653,2.318176,3.000000,0.000000,0.000000",
+      "mppi_seed": 4615
+    },
+    {
+      "episode_id": "episode_016",
+      "split": "train",
+      "scenario_class": "large_left",
+      "track_index": 429,
+      "lateral_offset_m": -0.18,
+      "heading_error_rad": -0.14,
+      "reference_speed_mps": 2.6,
+      "initial_state": "6.050662,10.503883,2.380230,2.600000,-0.030000,0.180000",
+      "mppi_seed": 4616
+    },
+    {
+      "episode_id": "episode_017",
+      "split": "train",
+      "scenario_class": "recovery",
+      "track_index": 502,
+      "lateral_offset_m": 0.22,
+      "heading_error_rad": -0.18,
+      "reference_speed_mps": 2.6,
+      "initial_state": "2.443275,9.553997,-2.510188,1.800000,0.050000,-0.300000",
+      "mppi_seed": 4617
+    },
+    {
+      "episode_id": "episode_018",
+      "split": "validation",
+      "scenario_class": "heldout_mixed_a",
+      "track_index": 575,
+      "lateral_offset_m": 0.14,
+      "heading_error_rad": -0.16,
+      "reference_speed_mps": 1.4,
+      "initial_state": "2.589086,6.689802,-1.096434,0.600000,-0.040000,0.250000",
+      "mppi_seed": 4618
+    },
+    {
+      "episode_id": "episode_019",
+      "split": "validation",
+      "scenario_class": "heldout_mixed_b",
+      "track_index": 648,
+      "lateral_offset_m": -0.22,
+      "heading_error_rad": 0.14,
+      "reference_speed_mps": 1.4,
+      "initial_state": "2.972733,4.053624,-2.361092,0.500000,0.040000,-0.250000",
+      "mppi_seed": 4619
+    },
+    {
+      "episode_id": "episode_020",
+      "split": "validation",
+      "scenario_class": "heldout_mixed_a",
+      "track_index": 721,
+      "lateral_offset_m": 0.14,
+      "heading_error_rad": -0.16,
+      "reference_speed_mps": 2.0,
+      "initial_state": "0.219342,1.614371,-2.107189,1.200000,-0.040000,0.250000",
+      "mppi_seed": 4620
+    },
+    {
+      "episode_id": "episode_021",
+      "split": "validation",
+      "scenario_class": "heldout_mixed_b",
+      "track_index": 42,
+      "lateral_offset_m": 0.22,
+      "heading_error_rad": -0.14,
+      "reference_speed_mps": 2.0,
+      "initial_state": "1.613021,-0.050053,-0.124372,0.500000,0.040000,-0.250000",
+      "mppi_seed": 4621
+    },
+    {
+      "episode_id": "episode_022",
+      "split": "validation",
+      "scenario_class": "heldout_mixed_a",
+      "track_index": 115,
+      "lateral_offset_m": 0.14,
+      "heading_error_rad": -0.16,
+      "reference_speed_mps": 2.6,
+      "initial_state": "5.935858,-0.169808,-0.259271,1.800000,-0.040000,0.250000",
+      "mppi_seed": 4622
+    },
+    {
+      "episode_id": "episode_023",
+      "split": "validation",
+      "scenario_class": "heldout_mixed_b",
+      "track_index": 188,
+      "lateral_offset_m": -0.22,
+      "heading_error_rad": 0.14,
+      "reference_speed_mps": 2.6,
+      "initial_state": "9.787109,-0.014385,0.880912,0.500000,0.040000,-0.250000",
+      "mppi_seed": 4623
+    },
+    {
+      "episode_id": "episode_024",
+      "split": "test",
+      "scenario_class": "heldout_recovery_a",
+      "track_index": 261,
+      "lateral_offset_m": 0.24,
+      "heading_error_rad": 0.2,
+      "reference_speed_mps": 1.4,
+      "initial_state": "8.616497,3.186912,2.279923,0.500000,0.060000,-0.350000",
+      "mppi_seed": 4624
+    },
+    {
+      "episode_id": "episode_025",
+      "split": "test",
+      "scenario_class": "heldout_recovery_b",
+      "track_index": 334,
+      "lateral_offset_m": -0.24,
+      "heading_error_rad": -0.2,
+      "reference_speed_mps": 1.4,
+      "initial_state": "9.113177,6.835522,1.892183,1.800000,-0.060000,0.350000",
+      "mppi_seed": 4625
+    },
+    {
+      "episode_id": "episode_026",
+      "split": "test",
+      "scenario_class": "heldout_recovery_a",
+      "track_index": 407,
+      "lateral_offset_m": 0.24,
+      "heading_error_rad": 0.2,
+      "reference_speed_mps": 2.0,
+      "initial_state": "6.524033,9.482593,2.487967,0.500000,0.060000,-0.350000",
+      "mppi_seed": 4626
+    },
+    {
+      "episode_id": "episode_027",
+      "split": "test",
+      "scenario_class": "heldout_recovery_b",
+      "track_index": 480,
+      "lateral_offset_m": 0.24,
+      "heading_error_rad": 0.2,
+      "reference_speed_mps": 2.0,
+      "initial_state": "3.607483,10.290228,-2.535498,2.400000,-0.060000,0.350000",
+      "mppi_seed": 4627
+    },
+    {
+      "episode_id": "episode_028",
+      "split": "test",
+      "scenario_class": "heldout_recovery_a",
+      "track_index": 553,
+      "lateral_offset_m": 0.24,
+      "heading_error_rad": 0.2,
+      "reference_speed_mps": 2.6,
+      "initial_state": "2.180140,7.592692,-0.976263,0.500000,0.060000,-0.350000",
+      "mppi_seed": 4628
+    },
+    {
+      "episode_id": "episode_029",
+      "split": "test",
+      "scenario_class": "heldout_recovery_b",
+      "track_index": 626,
+      "lateral_offset_m": -0.24,
+      "heading_error_rad": -0.2,
+      "reference_speed_mps": 2.6,
+      "initial_state": "3.426678,4.628374,-2.054983,3.000000,-0.060000,0.350000",
+      "mppi_seed": 4629
+    }
+  ]
+}
