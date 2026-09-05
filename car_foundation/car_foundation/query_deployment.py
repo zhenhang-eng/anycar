@@ -127,6 +127,26 @@ class QueryDeploymentModel(nn.Module):
         ):
             raise ValueError("future_action must have shape [N, 50, 2]")
 
+    def _validate_context_batch_inputs(
+        self, history, initial_state, current_action, future_action
+    ):
+        """Validate the one-action-sequence-per-context inference protocol."""
+        if history.ndim != 3 or tuple(history.shape[1:]) != (self.history_length, 7):
+            raise ValueError("history must have shape [B, 250, 7]")
+        batch_size = history.shape[0]
+        if batch_size < 1:
+            raise ValueError("context batch must be nonempty")
+        if tuple(initial_state.shape) != (batch_size, self.state_dim):
+            raise ValueError("initial_state must have shape [B, 5]")
+        if tuple(current_action.shape) != (batch_size, self.action_dim):
+            raise ValueError("current_action must have shape [B, 2]")
+        if tuple(future_action.shape) != (
+            batch_size,
+            self.horizon,
+            self.action_dim,
+        ):
+            raise ValueError("future_action must have shape [B, 50, 2]")
+
     def _kinematic_transition(self, state, action):
         vx = state[..., 3]
         yawrate = state[..., 4]
@@ -268,6 +288,68 @@ class QueryDeploymentModel(nn.Module):
         residual = residual_normalized * self.residual_std + self.residual_mean
         return self._residual_rollout(initial, future_action, residual)
 
+    def forward_context_batch(
+        self, history, initial_state, current_action, future_action
+    ):
+        """Roll out one action sequence for each independent physical context.
+
+        ``forward`` retains the deployment/MPPI contract of one context and N
+        candidate actions.  This explicit sibling path has an aligned leading
+        dimension instead: B histories, B states, B current actions, and B
+        future action sequences.  Keeping the paths separate prevents a batch
+        optimization from changing the established deployment numerics.
+        """
+        self._validate_context_batch_inputs(
+            history, initial_state, current_action, future_action
+        )
+        normalized_history_state = (
+            history[..., :5] - self.history_mean
+        ) / self.history_std
+        normalized_history = torch.cat(
+            (normalized_history_state, history[..., 5:7]), dim=-1
+        )
+
+        history_memory = self.model._build_history_emb(normalized_history)
+        history_memory = self.model.position_encoding["history"](history_memory)
+
+        context = torch.cat(
+            (
+                initial_state[:, 3:5],
+                future_action[:, 0, 0:1],
+                current_action[:, 1:2],
+            ),
+            dim=-1,
+        )
+        context = (context - self.context_mean) / self.context_std
+
+        nominal_absolute, nominal_transition = self._nominal_rollout(
+            initial_state, future_action
+        )
+        nominal_state = self._relative_state(initial_state, nominal_absolute)
+        nominal_state = (
+            nominal_state - self.nominal_state_mean
+        ) / self.nominal_state_std
+        nominal_transition_normalized = (
+            nominal_transition - self.nominal_transition_mean
+        ) / self.nominal_transition_std
+
+        action_embedding = self.model._build_action_emb(
+            normalized_history,
+            future_action,
+            context,
+            nominal_state,
+            nominal_transition_normalized,
+        )
+        action_embedding = self.model.position_encoding["action"](action_embedding)
+        hidden = self.model.transformer_decoder(
+            tgt=action_embedding,
+            memory=history_memory,
+            tgt_mask=self.model.tgt_mask,
+        )
+        residual_normalized = self.model.embedding["output"](hidden)
+        residual = residual_normalized * self.residual_std + self.residual_mean
+        return self._residual_rollout(initial_state, future_action, residual)
+
 
 class QueryRolloutBackend(Protocol):
     def __call__(
@@ -289,6 +371,18 @@ class TorchQueryRolloutBackend:
     def __call__(self, history, initial_state, current_action, future_action):
         with torch.inference_mode():
             return self.model(
+                history.to(self.device),
+                initial_state.to(self.device),
+                current_action.to(self.device),
+                future_action.to(self.device),
+            )
+
+    def evaluate_context_batch(
+        self, history, initial_state, current_action, future_action
+    ):
+        """Evaluate B aligned contexts without changing the MPPI call path."""
+        with torch.inference_mode():
+            return self.model.forward_context_batch(
                 history.to(self.device),
                 initial_state.to(self.device),
                 current_action.to(self.device),

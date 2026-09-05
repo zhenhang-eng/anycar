@@ -234,6 +234,20 @@ class TorchMPPIController:
             raise ValueError("reference horizon must be 50 (or 51 including current)")
         return reference
 
+    def _prepare_reference_batch(self, reference, batch_size: int) -> torch.Tensor:
+        reference = torch.as_tensor(
+            reference, dtype=torch.float32, device=self.device
+        )
+        if reference.ndim != 3 or reference.shape[0] != batch_size:
+            raise ValueError("reference must have shape [B,50,4/5] or [B,51,4/5]")
+        if reference.shape[2] not in (4, 5):
+            raise ValueError("reference must have 4 or 5 state channels")
+        if reference.shape[1] == self.params.horizon + 1:
+            reference = reference[:, 1:]
+        if reference.shape[1] != self.params.horizon:
+            raise ValueError("reference horizon must be 50 (or 51 including current)")
+        return reference
+
     @staticmethod
     def _wrapped_angle_difference(lhs, rhs):
         difference = lhs - rhs
@@ -296,6 +310,53 @@ class TorchMPPIController:
         )
         return components
 
+    def context_batch_cost_components(
+        self,
+        trajectory: torch.Tensor,
+        action: torch.Tensor,
+        reference: torch.Tensor,
+        current_action: torch.Tensor,
+    ) -> Dict[str, torch.Tensor]:
+        """Return costs for B aligned contexts with one action sequence each."""
+        batch_size = action.shape[0]
+        if trajectory.shape != (
+            batch_size,
+            self.params.horizon,
+            self.params.state_dim,
+        ):
+            raise ValueError("rollout backend returned an invalid context-batch shape")
+        if reference.shape[:2] != (batch_size, self.params.horizon):
+            raise ValueError("reference must align with the context batch")
+        if current_action.shape != (batch_size, self.params.action_dim):
+            raise ValueError("current_action must align with the context batch")
+        position_error = (
+            trajectory[..., 0:2] - reference[..., 0:2]
+        ).square().sum(dim=-1)
+        yaw_error = self._wrapped_angle_difference(
+            trajectory[..., 2], reference[..., 2]
+        ).square()
+        vx_error = (trajectory[..., 3] - reference[..., 3]).square()
+        components = {
+            "position": self.cost_weights.position * position_error.sum(dim=1),
+            "yaw": self.cost_weights.yaw * yaw_error.sum(dim=1),
+            "vx": self.cost_weights.vx * vx_error.sum(dim=1),
+        }
+        if reference.shape[2] == 5 and self.cost_weights.yawrate != 0:
+            components["yawrate"] = self.cost_weights.yawrate * (
+                trajectory[..., 4] - reference[..., 4]
+            ).square().sum(dim=1)
+        previous = torch.cat((current_action[:, None], action[:, :-1]), dim=1)
+        action_rate = action - previous
+        components["acceleration_rate"] = (
+            self.cost_weights.acceleration_rate
+            * action_rate[..., 0].square().sum(dim=1)
+        )
+        components["steering_rate"] = (
+            self.cost_weights.steering_rate
+            * action_rate[..., 1].square().sum(dim=1)
+        )
+        return components
+
     @torch.no_grad()
     def evaluate_action_sequences(
         self,
@@ -339,6 +400,68 @@ class TorchMPPIController:
             history, initial_state, current_action, action_sequences
         ).to(self.device)
         components = self.trajectory_cost_components(
+            trajectories, action_sequences, reference, current_action
+        )
+        cost = sum(components.values())
+        return {
+            "action_sequences": action_sequences.detach(),
+            "trajectories": trajectories.detach(),
+            "cost": cost.detach(),
+            "cost_components": {
+                name: value.detach() for name, value in components.items()
+            },
+        }
+
+    @torch.no_grad()
+    def evaluate_context_action_sequences(
+        self,
+        initial_state,
+        current_action,
+        history,
+        reference,
+        action_sequences,
+    ) -> Dict[str, object]:
+        """Roll out B contexts with exactly one aligned action sequence each.
+
+        The established ``evaluate_action_sequences`` path remains one physical
+        context with N candidates.  This explicit sibling path is B independent
+        physical contexts with one candidate per context.
+        """
+        if not hasattr(self.rollout_backend, "evaluate_context_batch"):
+            raise TypeError("rollout backend does not support aligned context batches")
+        initial_state = torch.as_tensor(
+            initial_state, dtype=torch.float32, device=self.device
+        )
+        if initial_state.ndim != 2 or initial_state.shape[1] != self.params.state_dim:
+            raise ValueError("initial_state must have shape [B,5]")
+        batch_size = initial_state.shape[0]
+        if batch_size < 1:
+            raise ValueError("context batch must be nonempty")
+        current_action = torch.as_tensor(
+            current_action, dtype=torch.float32, device=self.device
+        )
+        if current_action.shape != (batch_size, self.params.action_dim):
+            raise ValueError("current_action must have shape [B,2]")
+        history = torch.as_tensor(history, dtype=torch.float32, device=self.device)
+        if history.shape != (batch_size, self.params.history_length, 7):
+            raise ValueError("history must have shape [B,250,7]")
+        reference = self._prepare_reference_batch(reference, batch_size)
+        action_sequences = torch.as_tensor(
+            action_sequences, dtype=torch.float32, device=self.device
+        )
+        if action_sequences.shape != (
+            batch_size,
+            self.params.horizon,
+            self.params.action_dim,
+        ):
+            raise ValueError("action_sequences must have shape [B,50,2]")
+        action_sequences = torch.clamp(
+            action_sequences, self._action_min, self._action_max
+        )
+        trajectories = self.rollout_backend.evaluate_context_batch(
+            history, initial_state, current_action, action_sequences
+        ).to(self.device)
+        components = self.context_batch_cost_components(
             trajectories, action_sequences, reference, current_action
         )
         cost = sum(components.values())
