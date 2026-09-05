@@ -1,0 +1,112 @@
+{
+  "phase": "strict-noanchor-single-center-query-continuous-oac20to1-v1",
+  "supersedes": {
+    "config": "/home/plusai/anycar/scripts/model_verify/query_single_center_oac_config_20260902_v1.json",
+    "stationarity_reassessment": "/home/plusai/anycar/outputs/query_mppi/query_single_center_stationarity_reassessment_20260902_v1",
+    "override": "The nonflat fresh-FD P10 gate is diagnostic during this continuously refreshed OAC pilot, not an admission gate before the first Actor update.",
+    "reason": "The frozen-Query environment supplies every Actor-visited candidate with a real scalar cost, Twin Critics receive 20 updates before each single capped Actor update, and round zero remains eligible for real-Query checkpoint selection."
+  },
+  "sources": {
+    "absolute_replay": "/disk/collect_data_from_anycar/mppi_rl_closed_loop/labels/query_single_center_absolute_replay_20260902_v1",
+    "pretrain": "/home/plusai/anycar/outputs/query_mppi/query_single_center_actor_twin_critic_pretrain_20260902_v1",
+    "stationarity_reassessment": "/home/plusai/anycar/outputs/query_mppi/query_single_center_stationarity_reassessment_20260902_v1"
+  },
+  "output": "/home/plusai/anycar/outputs/query_mppi/query_single_center_actor_visited_oac20to1_20260902_v1",
+  "split_contract": {
+    "outer_fold": 0,
+    "inner_selection_fold": 1,
+    "fit_folds": [2, 3, 4],
+    "grouping": "complete episode; fit/inner-selection/OOF are disjoint",
+    "fit_usage": "Actor-visited collection plus Critic and Actor updates",
+    "inner_selection_usage": "real frozen-Query checkpoint selection only; round zero participates",
+    "oof_usage": "one evaluation of the frozen selected checkpoint per seed plus post-selection FD diagnosis; never selects a checkpoint, threshold, seed, or hyperparameter"
+  },
+  "pilot": {
+    "seeds": [0, 1, 2],
+    "rounds": 10,
+    "fit_contexts_visited_per_round": 20,
+    "context_stratification": "one fit context per speed_kph x road variant cell each round, cycling deterministic shuffled queues",
+    "candidates_per_visit": 39,
+    "candidate_contract": "current Actor center plus 16 antithetic full-rank probes plus six forward-response proposals",
+    "noise_sigma": [0.25, 0.35],
+    "probe_radius_sigma_start": 0.2,
+    "probe_radius_sigma_end": 0.05,
+    "probe_basis_cycle": [
+      "Sylvester-Hadamard-16",
+      "RMS-normalized orthonormal DCT-II-16",
+      "RMS-normalized deterministic QR-16 seed 260902",
+      "RMS-normalized deterministic QR-16 seed 260903"
+    ],
+    "response_fit_ridge": 0.1,
+    "response_gauss_newton_damping": 0.1,
+    "response_line_factors": [0.5, 1.0],
+    "response_maximum_step_equals_probe_radius": true,
+    "action_bounds": [-1.0, 1.0]
+  },
+  "critic_updates": {
+    "updates_per_actor_update_per_twin": 20,
+    "learning_rate": 0.0001,
+    "weight_decay": 0.000001,
+    "state_batch_size": 8,
+    "candidates_per_state": 48,
+    "maximum_online_candidates_per_state_batch": 24,
+    "online_focused_state_fraction": 0.5,
+    "ranking_weight": 0.35,
+    "ranking_temperature": 0.08,
+    "target_transform": "retain each pretrained Twin Critic's fit-only standardized log1p Query J50 transform"
+  },
+  "actor_updates": {
+    "updates_per_round": 1,
+    "learning_rate": 0.000002,
+    "weight_decay": 0.000001,
+    "batch_size": 64,
+    "objective": "mean conservative max(Q1,Q2) physical log1p Query cost plus output trust to the currently selected Actor checkpoint",
+    "selected_checkpoint_output_trust_weight": 10.0,
+    "gradient_clip_norm": 1.0,
+    "per_round_output_step_cap_sigma_rms": 0.02,
+    "step_cap_semantics": "cap only over all fit-context deterministic outputs; never enlarge a naturally smaller update",
+    "critic_parameters_frozen_during_actor_backward": true,
+    "analytic_query_gradient": false
+  },
+  "checkpoint_selection": {
+    "metric": "inner-selection real frozen-Query direct mean J50",
+    "tie_break": "first minimum",
+    "round_zero_eligible": true,
+    "latest_checkpoint_not_forced": true
+  },
+  "outcome_gates": {
+    "selected_inner_mean_cost_no_greater_than_round_zero": true,
+    "selected_inner_median_gain_vs_round_zero_nonnegative": true,
+    "selected_inner_p05_gain_vs_round_zero_nonnegative": true,
+    "minimum_seeds_passing_all_inner_gates": 2,
+    "fresh_fd_role": "diagnostic and stop/routing evidence after checkpoint selection; negative P10 alone does not retrospectively invalidate a real-Query-improving selected Actor",
+    "independent_checkpoint_reload_candidate_reconstruction_and_query_replay_required": true
+  },
+  "fresh_fd_diagnostic": {
+    "population": "outer-fold OOF states at the selected Actor checkpoint",
+    "one_sided_radius_sigma": 0.02,
+    "basis": "Sylvester-Hadamard-16 antithetic",
+    "ridge": 0.000001,
+    "flat_definition": "bottom 25 percent of true finite-difference gradient norm within each seed",
+    "report": [
+      "flat and nonflat true/predicted gradient norm",
+      "nonflat cosine median/P10 and median norm ratio"
+    ]
+  },
+  "replay": {
+    "retain_all_query_evaluated_candidates": true,
+    "retain_regressions_and_clipped_candidates": true,
+    "OOF_or_inner_rows_enter_training": false,
+    "next_state_or_bellman_bootstrap": false
+  },
+  "cost_weights": {
+    "position": 5.0,
+    "yaw": 5.0,
+    "vx": 1.0,
+    "acceleration_rate": 0.05,
+    "steering_rate": 0.1
+  },
+  "formal_validation_or_test_consumed": false,
+  "dbm_fields_or_labels_consumed": [],
+  "query_analytic_gradient_consumed": false
+}

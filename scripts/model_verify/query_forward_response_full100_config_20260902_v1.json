@@ -1,0 +1,17 @@
+{
+  "source_audit": "/disk/collect_data_from_anycar/mppi_rl_closed_loop/labels/query_noanchor_canonical_teacher_audit_20260901_v1",
+  "pilot_artifact": "/disk/collect_data_from_anycar/mppi_rl_closed_loop/labels/query_forward_response_landscape_pilot_20260902_v1",
+  "output_dir": "/disk/collect_data_from_anycar/mppi_rl_closed_loop/labels/query_forward_response_landscape_full100_20260902_v1",
+  "search_contract": "reuse pilot_artifact/config.json exactly",
+  "pilot_state_count": 20,
+  "new_state_count": 80,
+  "full_state_count": 100,
+  "expected_rows_per_fold": 20,
+  "rollouts_per_state": 765,
+  "new_query_rollouts": 61200,
+  "represented_query_rollouts": 76500,
+  "merge_order": "ascending source_audit_row; expected exactly 0..99",
+  "embedded_pilot_exact_array_equality_required": true,
+  "formal_validation_or_test_consumed": false,
+  "dbm_fields_or_labels_consumed": []
+}

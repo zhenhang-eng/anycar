@@ -1,0 +1,60 @@
+{
+  "phase": "query-single-center-actor-aggregation-matched-output-microstep-v1",
+  "sources": {
+    "absolute_replay": "/disk/collect_data_from_anycar/mppi_rl_closed_loop/labels/query_single_center_absolute_replay_20260902_v1",
+    "oac20to1": "/home/plusai/anycar/outputs/query_mppi/query_single_center_actor_visited_oac20to1_20260902_v1"
+  },
+  "output": "/home/plusai/anycar/outputs/query_mppi/query_actor_aggregation_microstep_20260902_v1",
+  "population": {
+    "seeds": [0, 1, 2],
+    "actor_and_critics": "each seed's selected OAC20:1 checkpoint",
+    "gradient_rows": "the checkpoint's 360 fit rows only",
+    "real_query_evaluation_rows": "the checkpoint's 120 inner-selection rows only",
+    "oof_usage": "none; outer OOF is not evaluated or used to choose aggregation"
+  },
+  "arms": [
+    {
+      "name": "gamma0_mean_log",
+      "gamma": 0.0,
+      "weight": "one"
+    },
+    {
+      "name": "gamma1_raw_cost_aware",
+      "gamma": 1.0,
+      "weight": "exp(detached conservative log1p cost), clipped then normalized to mean one"
+    }
+  ],
+  "weight_maximum": 2048.0,
+  "actor_objective": "mean(weight * conservative max(Q1,Q2) physical log1p Query J50)",
+  "gradient_contract": {
+    "optimizer": "raw full-fit gradient direction; no Adam state, momentum, weight decay, or Query analytic gradient",
+    "critic_parameters_frozen": true,
+    "batch_size": 40,
+    "gradient_clip": false,
+    "speed_group_gradients": "repeat the identical objective separately for 40/55/70/85/100 km/h and report pairwise parameter-gradient cosine"
+  },
+  "matched_output_steps_sigma_rms": [0.0005, 0.001, 0.002],
+  "primary_step_sigma_rms": 0.001,
+  "step_contract": {
+    "direction": "negative raw parameter gradient",
+    "calibration": "deterministic bisection of one scalar parameter-step multiplier until full-fit Actor output RMS matches the registered target",
+    "forcing_scope": "diagnostic only; exact matching is not the later continuous-OAC cap-only training rule",
+    "noise_sigma": [0.25, 0.35]
+  },
+  "cost_weights": {
+    "position": 5.0,
+    "yaw": 5.0,
+    "vx": 1.0,
+    "acceleration_rate": 0.05,
+    "steering_rate": 0.1
+  },
+  "routing": {
+    "advance_gamma1": "at the primary matched step, gamma1 has greater inner real-Query mean gain than gamma0 at both 85 and 100 km/h in at least two of three seeds, pooled mean is no worse, and pooled P05 worsens by no more than 0.25",
+    "mixed_tail": "if high-speed mean improves but the pooled P05 tolerance fails, test gamma0.5 before continuous OAC",
+    "no_highspeed_gain": "retain gamma0 and diagnose stable speed-group parameter-gradient conflict before changing Critic or collecting data"
+  },
+  "independent_validation": "reload selected Actor/Twin Critics, reproduce all aggregate and speed gradients, reconstruct every matched-output Actor, and replay every inner Query cost",
+  "formal_validation_or_test_consumed": false,
+  "dbm_fields_or_labels_consumed": [],
+  "query_analytic_gradient_consumed": false
+}

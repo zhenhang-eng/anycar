@@ -1,0 +1,117 @@
+{
+  "source_audit": "/disk/collect_data_from_anycar/mppi_rl_closed_loop/labels/query_noanchor_canonical_teacher_audit_20260901_v1",
+  "output_dir": "/disk/collect_data_from_anycar/mppi_rl_closed_loop/labels/query_forward_response_landscape_pilot_20260902_v1",
+  "pilot_version": "query-multibranch-four-round-forward-response-20state-v1",
+  "state_selection": {
+    "one_per_speed_variant_cell": true,
+    "speed_kph": [40, 55, 70, 85, 100],
+    "variant_index": [0, 1, 2, 3],
+    "base_fold_rule": "(speed_index + variant_index) % 5",
+    "fold_overrides": {
+      "speed_40_variant_1": 3,
+      "speed_40_variant_3": 1
+    },
+    "reason_for_override": "retain known episode_028 tail while preserving four rows per fold",
+    "expected_state_count": 20,
+    "expected_rows_per_fold": 4
+  },
+  "branches": [
+    {
+      "name": "observable_current_action_hold",
+      "role": "canonical",
+      "initial_center": "repeat current_action over 8 knots"
+    },
+    {
+      "name": "observable_current_action_to_zero",
+      "role": "canonical",
+      "initial_center": "linear interpolation from current_action to zero over 8 knots"
+    },
+    {
+      "name": "fixed_zero",
+      "role": "canonical",
+      "initial_center": "all-zero 8x2 knots"
+    },
+    {
+      "name": "prior_noanchor_canonical",
+      "role": "canonical",
+      "initial_center": "validated 20260901 no-warm canonical-search result"
+    },
+    {
+      "name": "old_warm_shadow",
+      "role": "shadow_only",
+      "initial_center": "stored old warm; forbidden from canonical branch selection"
+    }
+  ],
+  "round_count": 4,
+  "probe_contract": {
+    "new_candidates_per_branch_round": 32,
+    "design": "16 full-rank directions with antithetic signs; incumbent reused without a new rollout",
+    "basis_by_round": [
+      "Sylvester-Hadamard-16",
+      "RMS-normalized orthonormal DCT-II-16",
+      "RMS-normalized deterministic QR-16 seed 260902",
+      "RMS-normalized deterministic QR-16 seed 260903"
+    ],
+    "radius_sigma_by_round": [1.0, 0.5, 0.25, 0.1]
+  },
+  "response_contract": {
+    "fit": "same-state forward-only weighted ridge response from actual clipped displacement",
+    "fit_ridge": 0.1,
+    "gauss_newton_damping": 0.1,
+    "maximum_step_sigma_by_round": [1.0, 0.5, 0.25, 0.1],
+    "directions": [
+      "negative empirical scalar-cost gradient",
+      "weighted trajectory-residual damped Gauss-Newton",
+      "aligned normalized blend"
+    ],
+    "line_factors": [0.5, 1.0],
+    "new_proposals_per_branch_round": 6,
+    "selection": "exact Query argmin over incumbent, current probes, and current response proposals; first index wins exact ties"
+  },
+  "query_rollout_budget": {
+    "initial_centers_per_state": 5,
+    "new_rollouts_per_branch_round": 38,
+    "rollouts_per_state": 765,
+    "state_count": 20,
+    "total_new_query_rollouts": 15300
+  },
+  "noise_sigma": [0.25, 0.35],
+  "action_bounds": {
+    "minimum": [-1.0, -1.0],
+    "maximum": [1.0, 1.0]
+  },
+  "cost_weights": {
+    "position": 5.0,
+    "yaw": 5.0,
+    "vx": 1.0,
+    "acceleration_rate": 0.05,
+    "steering_rate": 0.1
+  },
+  "landscape_metrics": [
+    "best cost after every round for every branch",
+    "response fit error and predicted-versus-realized improvement",
+    "response proposal incremental gain over probe-only best",
+    "canonical versus warm/T0/old-fullrank cost and tail",
+    "number and separation of canonical final basins within 10 percent of per-state canonical best",
+    "canonical branch convergence/merging and speed/variant/tail slices"
+  ],
+  "pre_registered_expand_to_100_state_gates": {
+    "canonical_final_mean_cost_no_greater_than_old_warm": true,
+    "canonical_final_warm_regression_fraction_maximum": 0.25,
+    "canonical_final_aggregate_gain_vs_prior_canonical_minimum_fraction": 0.1,
+    "first_two_round_response_proposal_improvement_fraction_minimum": 0.5,
+    "trajectory_response_realized_improvement_positive_fraction_minimum": 0.5,
+    "all_speed_groups_nonnegative_mean_gain_vs_prior_canonical": true,
+    "numerical_and_independent_replay_required": true
+  },
+  "routing": {
+    "all_expand_gates_pass": "freeze the method and expand the same contract to the remaining 80 train-only states",
+    "response_works_but_cost_gate_fails": "adjust only seed geometry/radius on the same 20 states; do not add states or train Actor",
+    "response_gate_fails": "stop this response construction and retain the 20260901 diagnosis; do not replace it with a large one-shot bank"
+  },
+  "teacher_created": false,
+  "actor_or_critic_trained": false,
+  "analytic_dbm_or_query_gradient_consumed": false,
+  "formal_validation_or_test_consumed": false,
+  "dbm_fields_or_labels_consumed": []
+}

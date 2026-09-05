@@ -1,0 +1,117 @@
+{
+  "phase": "strict-noanchor-single-center-query-oac-v1",
+  "sources": {
+    "fullrank_600": "/disk/collect_data_from_anycar/mppi_rl_closed_loop/labels/query_expected_road_fullrank_expansion_20260901_v3",
+    "forward_response_pilot_20": "/disk/collect_data_from_anycar/mppi_rl_closed_loop/labels/query_forward_response_landscape_pilot_20260902_v1",
+    "forward_response_remaining_80": "embedded as newly evaluated rows inside forward_response_full_100; no separate artifact",
+    "forward_response_full_100": "/disk/collect_data_from_anycar/mppi_rl_closed_loop/labels/query_forward_response_landscape_full100_20260902_v1"
+  },
+  "outputs": {
+    "absolute_replay": "/disk/collect_data_from_anycar/mppi_rl_closed_loop/labels/query_single_center_absolute_replay_20260902_v1",
+    "pretrain": "/home/plusai/anycar/outputs/query_mppi/query_single_center_actor_twin_critic_pretrain_20260902_v1",
+    "oac_pilot": "/home/plusai/anycar/outputs/query_mppi/query_single_center_actor_visited_oac_20260902_v1"
+  },
+  "split_contract": {
+    "folds": 5,
+    "outer_oof_fold": "f",
+    "inner_selection_fold": "(f + 1) % 5",
+    "fit_folds": "the remaining three folds",
+    "grouping": "complete episode; no episode crosses fit/selection/OOF",
+    "oof_usage": "score only; never checkpoint, threshold, epoch, seed, or hyperparameter selection"
+  },
+  "actor": {
+    "architecture": "DirectNoAnchorGTXActor",
+    "output": "one absolute [8,2] center",
+    "inputs": [
+      "history[250,7]",
+      "expected-road ego reference[50,5]",
+      "observable [vx,yawrate,current_acceleration,current_steering]"
+    ],
+    "forbidden_inputs": [
+      "warm_or_anchor",
+      "T0_or_teacher",
+      "search_feedback",
+      "gradient_context",
+      "candidate_cost_or_index",
+      "DBM_field_or_label"
+    ],
+    "coarse_initialization": {
+      "target": "final observable_current_action_to_zero forward-response branch where available; fullrank absolute teacher only for the other mature snapshots",
+      "epochs": 50,
+      "selection_stride": 10,
+      "purpose": "bounded finite round-0 initialization only; Actor BC cost/recovery is not an OAC admission gate"
+    },
+    "architecture_change": false,
+    "multihead_or_gaussian_head": false
+  },
+  "critic": {
+    "architecture": "two independent ConfigurableAbsoluteActionValueCritic models",
+    "inputs": "the same strict observable context plus an explicit absolute candidate [8,2]",
+    "target": "fit-only standardized log1p frozen-Query direct J50",
+    "loss": "Huber absolute value plus same-state pair ranking",
+    "fullrank_candidates_per_state": 132,
+    "landscape_candidates_per_state": 765,
+    "state_balancing": "sample contexts first, then candidates; the 100 landscape contexts must not dominate the other 500 mature snapshots",
+    "candidate_sampling": "48 valid candidates per sampled state: exact warm index 0, the fit-state minimum, 23 uniform valid candidates, and 23 candidates balanced across fit-state log-cost quantiles; labels are used only inside fit folds",
+    "target_standardization": "fit-only and state-balanced: each fit context has equal weight regardless of whether it has 132 or 897 valid candidates",
+    "epochs": 240,
+    "selection_stride": 10,
+    "state_batch_size": 8,
+    "candidates_per_state": 48,
+    "learning_rate": 0.0002,
+    "weight_decay": 0.000001,
+    "ranking_weight": 0.35,
+    "ranking_temperature": 0.08,
+    "seeds": [0, 1, 2],
+    "pairwise_delta_head_enabled": false,
+    "analytic_query_or_dbm_gradient_target": false
+  },
+  "critic_pretrain_gates": {
+    "aggregation": "compute state-level metrics first, then take the median over all 600 OOF states for each pooled seed; at least 2 of 3 pooled seeds must pass every gate",
+    "oof_log_cost_pearson_median_minimum": 0.7,
+    "oof_same_state_pair_sign_accuracy_median_minimum": 0.75,
+    "oof_landscape_bank_gain_recovery_median_minimum": 0.5,
+    "landscape_bank_gain_recovery_definition": "over the 100 OOF landscape contexts, sum(prior_noanchor_canonical_cost - critic_selected_cost) / sum(prior_noanchor_canonical_cost - best_canonical_eligible_cost); selection and oracle exclude old-warm-shadow branch candidates",
+    "fresh_actor_center_fd_radius_sigma": 0.02,
+    "fresh_actor_center_fd_basis": "Sylvester-Hadamard-16 antithetic",
+    "fresh_actor_center_gradient_cosine_median_minimum": 0.7,
+    "fresh_actor_center_gradient_cosine_p10_minimum": 0.0,
+    "fresh_actor_center_gradient_norm_ratio_median_minimum": 0.5,
+    "fresh_actor_center_gradient_norm_ratio_median_maximum": 2.0,
+    "minimum_pooled_seeds_passing_all_gates": 2,
+    "independent_checkpoint_reload_and_query_replay_required": true
+  },
+  "oac_pilot": {
+    "allowed_only_after_critic_gates_pass": true,
+    "type": "terminal contextual bandit; no next-state, Bellman bootstrap, target network, or entropy",
+    "outer_fold": 0,
+    "seeds": [0, 1, 2],
+    "rounds": 10,
+    "fit_contexts_visited_per_round": 20,
+    "actor_center_plus_probes_and_response_proposals_per_visit": 39,
+    "candidate_contract": "Actor center + 16 antithetic directions + six forward-response proposals",
+    "critic_updates_per_actor_update": 20,
+    "actor_updates_per_round": 1,
+    "actor_output_step_cap_sigma_rms": 0.02,
+    "actor_step_cap_semantics": "cap only; never scale a naturally smaller update upward",
+    "actor_objective": "mean conservative max(Q1,Q2) log-cost plus output trust",
+    "replay": "retain every Query-evaluated candidate including regressions and clipped actions",
+    "checkpoint_selection": "fresh frozen-Query direct cost on the inner-selection episodes; round zero participates",
+    "mechanism_gates": {
+      "selected_inner_mean_cost_no_greater_than_round_zero": true,
+      "selected_inner_median_gain_vs_round_zero_nonnegative": true,
+      "selected_inner_p05_gain_vs_round_zero_nonnegative": true,
+      "fresh_local_critic_gate_remains_satisfied": true,
+      "independent_query_replay_required": true
+    }
+  },
+  "warm_contract": {
+    "role": "external shadow comparator and future hard guard only",
+    "actor_input": false,
+    "actor_loss_input": false,
+    "canonical_or_actor_selection_input": false
+  },
+  "formal_validation_or_test_consumed": false,
+  "dbm_fields_or_labels_consumed": [],
+  "query_analytic_gradient_consumed": false
+}

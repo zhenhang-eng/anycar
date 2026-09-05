@@ -1,0 +1,82 @@
+{
+  "phase": "query-single-center-continuous-oac-aggregation-ab-v1",
+  "sources": {
+    "absolute_replay": "/disk/collect_data_from_anycar/mppi_rl_closed_loop/labels/query_single_center_absolute_replay_20260902_v1",
+    "pretrain": "/home/plusai/anycar/outputs/query_mppi/query_single_center_actor_twin_critic_pretrain_20260902_v1",
+    "microstep_diagnostic": "/home/plusai/anycar/outputs/query_mppi/query_actor_aggregation_microstep_20260902_v1"
+  },
+  "output": "/home/plusai/anycar/outputs/query_mppi/query_oac_aggregation_ab_20260902_v1",
+  "arms": [
+    {"name": "gamma0_mean_log", "gamma": 0.0},
+    {"name": "gamma1_raw_cost_aware", "gamma": 1.0}
+  ],
+  "actor_cost_weight_maximum": 2048.0,
+  "split_contract": {
+    "outer_fold": 0,
+    "inner_selection_fold": 1,
+    "fit_folds": [2, 3, 4],
+    "OOF_usage": "evaluate each arm's frozen inner-selected checkpoint once; never select an arm, round, seed, threshold, or hyperparameter"
+  },
+  "pilot": {
+    "seeds": [0, 1, 2],
+    "rounds": 10,
+    "fit_contexts_visited_per_round": 20,
+    "candidates_per_visit": 39,
+    "noise_sigma": [0.25, 0.35],
+    "probe_radius_sigma_start": 0.2,
+    "probe_radius_sigma_end": 0.05,
+    "response_fit_ridge": 0.1,
+    "response_gauss_newton_damping": 0.1,
+    "response_line_factors": [0.5, 1.0]
+  },
+  "critic_updates": {
+    "updates_per_actor_update_per_twin": 20,
+    "learning_rate": 0.0001,
+    "weight_decay": 0.000001,
+    "state_batch_size": 8,
+    "candidates_per_state": 48,
+    "maximum_online_candidates_per_state_batch": 24,
+    "online_focused_state_fraction": 0.5,
+    "ranking_weight": 0.35,
+    "ranking_temperature": 0.08
+  },
+  "actor_updates": {
+    "updates_per_round": 1,
+    "learning_rate": 0.000002,
+    "weight_decay": 0.000001,
+    "batch_size": 64,
+    "selected_checkpoint_output_trust_weight": 10.0,
+    "gradient_clip_norm": 1.0,
+    "per_round_output_step_cap_sigma_rms": 0.02,
+    "step_cap_semantics": "cap only over all fit outputs; never enlarge a naturally smaller update"
+  },
+  "pairing": {
+    "same_pretrain_checkpoint": true,
+    "same_context_queue_and_basis_stream": true,
+    "same_critic_and_actor_update_budget": true,
+    "same_learning_rates_and_trust": true,
+    "only_registered_difference": "detached Actor cost aggregation weight gamma"
+  },
+  "checkpoint_selection": "lowest inner frozen-Query mean cost with round zero eligible and first minimum winning ties",
+  "decision_gate": {
+    "primary_population": "outer-fold OOF, reported only after every arm/seed checkpoint is frozen",
+    "gamma1_oof_mean_advantage_seed_count_minimum": 2,
+    "gamma1_pooled_oof_mean_no_worse": true,
+    "gamma1_85kmh_mean_advantage_seed_count_minimum": 2,
+    "gamma1_100kmh_mean_advantage_seed_count_minimum": 2,
+    "gamma1_pooled_oof_p05_tolerance": 0.25,
+    "pass": "adopt gamma1 for the next same-contract OAC expansion",
+    "tail_mixed": "if high-speed and pooled mean pass but P05 tolerance fails, test gamma0.5",
+    "fail": "retain gamma0 and treat speed-group parameter conflict as the next mechanism issue"
+  },
+  "cost_weights": {
+    "position": 5.0,
+    "yaw": 5.0,
+    "vx": 1.0,
+    "acceleration_rate": 0.05,
+    "steering_rate": 0.1
+  },
+  "formal_validation_or_test_consumed": false,
+  "dbm_fields_or_labels_consumed": [],
+  "query_analytic_gradient_consumed": false
+}

@@ -1,0 +1,53 @@
+{
+  "phase": "query-single-center-stationarity-aware-reassessment-v1",
+  "sources": {
+    "absolute_replay": "/disk/collect_data_from_anycar/mppi_rl_closed_loop/labels/query_single_center_absolute_replay_20260902_v1",
+    "pretrain": "/home/plusai/anycar/outputs/query_mppi/query_single_center_actor_twin_critic_pretrain_20260902_v1",
+    "ranking_diagnostic": "/home/plusai/anycar/outputs/query_mppi/query_single_center_critic_ranking_diagnostic_20260902_v1"
+  },
+  "output": "/home/plusai/anycar/outputs/query_mppi/query_single_center_stationarity_reassessment_20260902_v1",
+  "audit_population": "all 600 episode-heldout OOF Actor centers for each of seeds 0,1,2; OOF scores never select thresholds, checkpoints, steps, or seeds",
+  "fresh_fd": {
+    "basis": "Sylvester-Hadamard-16 antithetic",
+    "one_sided_radius_sigma": 0.02,
+    "sigma": [0.25, 0.35],
+    "candidate_count_per_center": 32,
+    "gradient_coordinate": "z=(absolute_knots-center)/sigma",
+    "target": "least-squares gradient of log1p(Query J50) using base plus actual clipped displacements",
+    "ridge": 1e-06,
+    "query_analytic_gradient_consumed": false
+  },
+  "stratification": {
+    "flat": "bottom 25 percent of true fresh-FD gradient norm independently within each pooled seed",
+    "nonflat": "remaining 75 percent",
+    "reason": "historical stationarity evidence shows direction cosine is ill-conditioned near a true flat optimum"
+  },
+  "nonflat_actor_update_gates": {
+    "gradient_cosine_median_minimum": 0.7,
+    "gradient_cosine_p10_minimum": 0.0,
+    "gradient_norm_ratio_median_minimum": 0.5,
+    "gradient_norm_ratio_median_maximum": 2.0
+  },
+  "flat_contract": {
+    "direction_gate": false,
+    "required_behavior": "preserve gradient magnitude, allow stay, and do not manufacture a large update",
+    "diagnostic_unscaled_step_eta": 0.001,
+    "per_component_cap_sigma": 0.02,
+    "step_normalization": "none",
+    "report": [
+      "true and predicted gradient norm",
+      "flat/nonflat predicted-norm separation",
+      "actual Query gain after capped unnormalized Critic step",
+      "stay curves selected only on inner-selection data in the later OAC runner"
+    ]
+  },
+  "routing": {
+    "critic_only_actor_visited_burnin": "allowed if existing global value Pearson and landscape recovery gates pass, even when unweighted near-tie pair-sign fails",
+    "actor_updates": "allowed only if nonflat fresh-FD gates pass; flat rows do not require direction accuracy and remain protected by magnitude-preserving cap, real Query checkpoint selection, and later stay/guard logic",
+    "if_nonflat_gate_fails": "start only frozen-Actor actor-visited Critic burn-in, then repeat this audit before the first Actor update",
+    "if_nonflat_gate_passes": "run the small continuous OAC mechanism pilot with round zero eligible for selection"
+  },
+  "formal_validation_or_test_consumed": false,
+  "dbm_fields_or_labels_consumed": [],
+  "actor_updated": false
+}

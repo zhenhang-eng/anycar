@@ -1,0 +1,62 @@
+{
+  "phase": "query-oac-gamma1-k4-selected-matched-output-step-v1",
+  "sources": {
+    "absolute_replay": "/disk/collect_data_from_anycar/mppi_rl_closed_loop/labels/query_single_center_absolute_replay_20260902_v1",
+    "gamma1_k_scan": "/home/plusai/anycar/outputs/query_mppi/query_oac_gamma1_k_scan_20260902_v1"
+  },
+  "output": "/home/plusai/anycar/outputs/query_mppi/query_oac_gamma1_matched_step_20260902_v1",
+  "population": {
+    "arm": "gamma1_k4",
+    "seeds": [0, 1, 2],
+    "gradient_rows": "each checkpoint's 360 fit rows only",
+    "real_query_evaluation_rows": "each checkpoint's 120 inner-selection rows only",
+    "outer_development_oof_usage": "none"
+  },
+  "actor_objective": {
+    "gamma": 1.0,
+    "weight_maximum": 2048.0,
+    "definition": "mean(normalized clipped exp(detached conservative Twin log1p Query J50) * conservative Twin log1p Query J50)"
+  },
+  "gradient_contract": {
+    "critic_parameters_frozen": true,
+    "batch_size": 64,
+    "optimizer": "one raw full-fit negative parameter-gradient direction; no Adam state, momentum, weight decay, or Query analytic gradient",
+    "base_checkpoint": "each seed's K4 inner-selected Actor and paired selected Twin Critics"
+  },
+  "matched_output_steps_sigma_rms": [0.005, 0.01, 0.02],
+  "step_contract": {
+    "calibration": "deterministic scalar bisection until full-fit Actor output RMS equals the target",
+    "forcing_scope": "one-step diagnostic only; exact matching is not the later continuous-OAC cap-only rule",
+    "noise_sigma": [0.25, 0.35]
+  },
+  "evaluation_contract": {
+    "base": "the frozen K4 selected Actor at the same seed",
+    "external_reference": "deterministic warm center evaluated by the same frozen Query",
+    "metrics": [
+      "gain versus K4 base mean/median/P05/worst",
+      "P(J_step <= J_warm)",
+      "warm-relative gain median/P05/worst",
+      "sum(J_warm-J_step)/sum(J_warm)",
+      "speed slices"
+    ],
+    "selection": "diagnostic mean-response curve only; no step is automatically promoted to a long-run LR or cap"
+  },
+  "routing": {
+    "mean_response_unsaturated": "pooled gain versus K4 base is strictly increasing from 0.005 through 0.02 sigma and the 0.02 step improves mean in at least two of three seeds",
+    "interior_mean_optimum": "the pooled best mean-gain step is below 0.02 sigma",
+    "no_reliable_direction": "no step improves mean in at least two of three seeds",
+    "tail_role": "P05/worst and speed slices are mandatory evidence for the long-curve preregistration but do not retroactively redefine this one-step mechanism diagnostic"
+  },
+  "cost_weights": {
+    "position": 5.0,
+    "yaw": 5.0,
+    "vx": 1.0,
+    "acceleration_rate": 0.05,
+    "steering_rate": 0.1
+  },
+  "independent_validation": "reload source checkpoints, reconstruct gamma1 weights/gradient, recalibrate every step, replay base and stepped inner Query costs, and recompute routing",
+  "new_training": false,
+  "formal_validation_or_test_consumed": false,
+  "dbm_fields_or_labels_consumed": [],
+  "query_analytic_gradient_consumed": false
+}
