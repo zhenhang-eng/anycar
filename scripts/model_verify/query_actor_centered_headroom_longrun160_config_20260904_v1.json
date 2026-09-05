@@ -1,0 +1,99 @@
+{
+  "phase": "query-actor-centered-headroom-longrun160-v1",
+  "output": "/home/plusai/anycar/outputs/query_mppi/query_actor_centered_headroom_longrun160_20260904_v1",
+  "sources": {
+    "absolute_replay": "/disk/collect_data_from_anycar/mppi_rl_closed_loop/labels/query_target_coverage_absolute_replay_20260903_v1",
+    "actor_oac": "/home/plusai/anycar/outputs/query_mppi/query_continuous_ac_longrun_160_20260904_v1/longrun",
+    "actor_oac_root": "/home/plusai/anycar/outputs/query_mppi/query_continuous_ac_longrun_160_20260904_v1",
+    "actor_oac_summary_sha256": "ded8667ae1decd6cb5f4ff5e07c6bc7cb62e320ef235a06734f0021f9fd477c2",
+    "actor_oac_validation_sha256": "10564dbf7052cfdd17cc03be15289ca8d9debdb8458e45b8313acf92992d23ad",
+    "actor_oac_qualification": "QUERY_CONTINUOUS_AC_LONGRUN_160_THREE_SEED_INDEPENDENT_PASS"
+  },
+  "split_contract": {
+    "inner_selection_fold": 1,
+    "expected_state_count": 120,
+    "outer_fold": 0,
+    "outer_fold_usage": "sealed and never evaluated"
+  },
+  "actor_seeds": [0, 1, 2],
+  "expected_selected_round_by_seed": {
+    "0": 139,
+    "1": 131,
+    "2": 139
+  },
+  "source_execution_adapter": {
+    "purpose": "recompute the saved batched selected cost with the per-state Query path used by the frozen headroom audit",
+    "actor_action_max_abs_error": 0.0,
+    "cost_difference_scale_floor": 1.0,
+    "maximum_allowed_absolute_cost_difference": 0.02,
+    "maximum_allowed_scaled_relative_cost_difference": 0.002,
+    "selection_rows_must_match": true,
+    "original_source_hashes_must_match": true
+  },
+  "round_count": 4,
+  "noise_sigma": [0.25, 0.35],
+  "action_bounds": {
+    "minimum": [-1.0, -1.0],
+    "maximum": [1.0, 1.0]
+  },
+  "cost_weights": {
+    "position": 5.0,
+    "yaw": 5.0,
+    "vx": 1.0,
+    "acceleration_rate": 0.05,
+    "steering_rate": 0.1
+  },
+  "probe_contract": {
+    "new_candidates_per_round": 32,
+    "design": "16 full-rank directions with antithetic signs; incumbent retained without rerollout",
+    "basis_by_round": [
+      "Sylvester-Hadamard-16",
+      "RMS-normalized orthonormal DCT-II-16",
+      "RMS-normalized deterministic QR-16 seed 260902",
+      "RMS-normalized deterministic QR-16 seed 260903"
+    ],
+    "radius_sigma_by_round": [1.0, 0.5, 0.25, 0.1]
+  },
+  "response_contract": {
+    "fit": "same-state forward-only weighted ridge response from actual clipped displacement",
+    "fit_ridge": 0.1,
+    "gauss_newton_damping": 0.1,
+    "maximum_step_sigma_by_round": [1.0, 0.5, 0.25, 0.1],
+    "directions": [
+      "negative empirical scalar-cost gradient",
+      "weighted trajectory-residual damped Gauss-Newton",
+      "aligned normalized blend"
+    ],
+    "line_factors": [0.5, 1.0],
+    "new_proposals_per_round": 6,
+    "selection": "exact Query argmin over incumbent, current probes, and current response proposals; first index wins exact ties"
+  },
+  "query_rollout_budget": {
+    "initial_actor_centers_per_seed_state": 1,
+    "new_rollouts_per_round": 38,
+    "rollouts_per_seed_state": 153,
+    "seed_count": 3,
+    "state_count": 120,
+    "total_query_rollouts": 55080
+  },
+  "primary_metrics": [
+    "mean actor-to-best Query cost gain",
+    "aggregate residual reduction relative to Actor cost",
+    "paired median relative reduction",
+    "fraction of states with positive improvement"
+  ],
+  "diagnostic_only_metrics": [
+    "P05 and worst actor-to-best gain",
+    "hard speed-variant slices"
+  ],
+  "routing": {
+    "aggregate_residual_reduction_below_0.02": "stop broad Actor hyperparameter and data expansion",
+    "aggregate_residual_reduction_0.02_to_0.05": "allow only low-cost single-variable Actor absorption A/B",
+    "aggregate_residual_reduction_at_least_0.05_and_majority_improved": "diagnose and improve Actor absorption before adding more search-teacher data",
+    "tail_metrics": "record only; never veto a better primary mean or aggregate result in this phase"
+  },
+  "actor_or_critic_trained": false,
+  "analytic_dbm_or_query_gradient_consumed": false,
+  "formal_validation_or_test_consumed": false,
+  "dbm_fields_or_labels_consumed": []
+}

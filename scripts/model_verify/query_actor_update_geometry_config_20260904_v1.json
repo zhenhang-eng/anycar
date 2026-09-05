@@ -1,0 +1,54 @@
+{
+  "output": "/home/plusai/anycar/outputs/query_mppi/query_actor_update_geometry_20260904_v1",
+  "sources": {
+    "absolute_replay": "/disk/collect_data_from_anycar/mppi_rl_closed_loop/labels/query_target_coverage_absolute_replay_20260903_v1",
+    "coarse77_three_seed": "/home/plusai/anycar/outputs/query_mppi/query_continuous_ac_coarse_to_fine77_3seed_20260904_v1",
+    "coarse77_summary_sha256": "a91d3532128a85e321b1da8d0b04ad66eac83732474c0b72267086e450cb82d2",
+    "coarse77_validation_sha256": "3e339d43cc8f2b9fc72e6720843513313f5a4c3352a05807eb9bd9c729c859cc",
+    "coarse77_qualification": "QUERY_CONTINUOUS_AC_COARSE_TO_FINE77_THREE_SEED_INDEPENDENT_PASS"
+  },
+  "population": {
+    "seeds": [0, 1, 2],
+    "candidate_count": 77,
+    "expected_online_groups_per_seed": 800
+  },
+  "split_contract": {
+    "fit_folds": [2, 3, 4],
+    "inner_selection_fold": 1,
+    "outer_fold": 0,
+    "expected_sizes": [432, 120, 120]
+  },
+  "gradient_contract": {
+    "gamma": 1.0,
+    "weight_maximum": 2048.0,
+    "batch_size": 64,
+    "noise_sigma": [0.25, 0.35],
+    "secant_epsilon": 1e-8,
+    "speed_values_kph": [40, 55, 70, 85, 100],
+    "direction": "parameter update: negative conservative-Critic objective gradient versus positive Actor-Jacobian transpose empirical bank response",
+    "empirical_state_balance": "average visit response within each physical fit row before Actor VJP"
+  },
+  "microstep_contract": {
+    "target_full_fit_output_sigma_rms": 0.001,
+    "directions": ["critic_gamma1", "empirical_secant"],
+    "selection_only": true,
+    "checkpoint_saved": false
+  },
+  "decision_gate": {
+    "material_negative_cosine": -0.05,
+    "stable_pair_minimum_seed_count": 2,
+    "stable_pair_minimum_count_for_pcgrad": 2,
+    "critic_empirical_positive_minimum_seed_count": 2,
+    "critic_step_pooled_mean_gain_minimum": 0.0
+  },
+  "cost_weights": {
+    "position": 5.0,
+    "yaw": 5.0,
+    "vx": 1.0,
+    "acceleration_rate": 0.05,
+    "steering_rate": 0.1
+  },
+  "formal_validation_or_test_consumed": false,
+  "dbm_fields_or_labels_consumed": [],
+  "query_analytic_gradient_consumed": false
+}

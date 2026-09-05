@@ -1,0 +1,18 @@
+{
+  "phase": "query-continuous-ac-equal-cell-longrun160-v1",
+  "output": "/home/plusai/anycar/outputs/query_mppi/query_continuous_ac_equal_cell_longrun160_20260904_v1",
+  "sources": {
+    "pilot40_root": "/home/plusai/anycar/outputs/query_mppi/query_continuous_ac_equal_cell_ab_20260904_v1",
+    "pilot40_summary_sha256": "1cb6a64429f831d156a86cfc004302ae9fac410fd7cb2ce226bc011cde9f78ab",
+    "pilot40_validation_sha256": "79497ad9694dd385599abf4b082f6260ef4b8d93c58b85d35196db99f92fa83c",
+    "pilot40_qualification": "QUERY_CONTINUOUS_AC_EQUAL_CELL_THREE_SEED_INDEPENDENT_PASS"
+  },
+  "rounds": 160,
+  "prefix_rounds": 40,
+  "primary_decision": "promote longrun only when selected pooled mean is lower, pooled warm-relative aggregate is higher, and at least two of three seed selected means are lower than pilot40",
+  "tail_metrics_role": "diagnostic only",
+  "actor_or_critic_trained": true,
+  "query_analytic_gradient_consumed": false,
+  "formal_validation_or_test_consumed": false,
+  "dbm_fields_or_labels_consumed": []
+}

@@ -1,0 +1,31 @@
+{
+  "output": "/home/plusai/anycar/outputs/query_mppi/query_actor_equal_cell_matched_step_20260904_v1",
+  "sources": {
+    "stratum_geometry": "/home/plusai/anycar/outputs/query_mppi/query_actor_stratum_geometry_20260904_v1",
+    "stratum_manifest_sha256": "216974024f927b004fa9d45edc5a8e0e9cdb0cc512d9ecfbe4ca8ffffd679827",
+    "stratum_summary_sha256": "481c61949eab14c77565e4e3784686062d18c63b88b199df716663b32766eff1",
+    "stratum_validation_sha256": "58f8a7e7dd05d5a1e6f689eaf9936c4bb59696c646bb315c235e67c97899873a",
+    "stratum_qualification": "QUERY_ACTOR_STRATUM_GEOMETRY_INDEPENDENT_PASS"
+  },
+  "population": {
+    "seeds": [0, 1, 2],
+    "arms": ["native_uniform_row", "equal_20_cell"]
+  },
+  "matched_output_steps_sigma_rms": [0.001, 0.002],
+  "noise_sigma": [0.25, 0.35],
+  "cost_weights": {
+    "position": 5.0,
+    "yaw": 5.0,
+    "vx": 1.0,
+    "acceleration_rate": 0.05,
+    "steering_rate": 0.1
+  },
+  "decision_gate": {
+    "equal_cell_pooled_cost_strictly_lower_at_each_step": true,
+    "equal_cell_seed_win_minimum_at_each_step": 2,
+    "equal_cell_pooled_gain_strictly_positive_at_each_step": true
+  },
+  "formal_validation_or_test_consumed": false,
+  "dbm_fields_or_labels_consumed": [],
+  "query_analytic_gradient_consumed": false
+}

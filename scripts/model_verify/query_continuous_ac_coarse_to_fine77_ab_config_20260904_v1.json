@@ -1,0 +1,78 @@
+{
+  "phase": "query-continuous-ac-coarse-to-fine77-ab-single-seed-v1",
+  "output": "/home/plusai/anycar/outputs/query_mppi/query_continuous_ac_coarse_to_fine77_ab_20260904_v1",
+  "sources": {
+    "absolute_replay": "/disk/collect_data_from_anycar/mppi_rl_closed_loop/labels/query_target_coverage_absolute_replay_20260903_v1",
+    "actor_oac_root": "/home/plusai/anycar/outputs/query_mppi/query_continuous_ac_longrun_160_20260904_v1",
+    "actor_oac_summary_sha256": "ded8667ae1decd6cb5f4ff5e07c6bc7cb62e320ef235a06734f0021f9fd477c2",
+    "actor_oac_validation_sha256": "10564dbf7052cfdd17cc03be15289ca8d9debdb8458e45b8313acf92992d23ad",
+    "actor_oac_qualification": "QUERY_CONTINUOUS_AC_LONGRUN_160_THREE_SEED_INDEPENDENT_PASS"
+  },
+  "split_contract": {
+    "fit_folds": [2, 3, 4],
+    "inner_selection_fold": 1,
+    "outer_fold": 0,
+    "outer_fold_usage": "sealed and never evaluated"
+  },
+  "pilot": {
+    "seeds": [0],
+    "source_selected_round": 139,
+    "rounds": 40,
+    "fit_contexts_visited_per_round": 20,
+    "candidate_arms": {
+      "control_recenter65": 65,
+      "coarse_to_fine77": 77
+    },
+    "noise_sigma": [0.25, 0.35],
+    "probe_radius_sigma_anneal_rounds": 90,
+    "control_radius_start": 0.2,
+    "control_radius_end": 0.05,
+    "coarse_radius_start": 1.0,
+    "coarse_radius_end": 0.1,
+    "fine_radius_start": 0.2,
+    "fine_radius_end": 0.05,
+    "response_fit_ridge": 0.1,
+    "response_gauss_newton_damping": 0.1,
+    "response_line_factors": [0.5, 1.0],
+    "recenter_radius_ratio": 0.7,
+    "recenter_direction_basis": "RMS-normalized deterministic QR-16 seed 260904, first 13 rows with antithetic signs",
+    "fine_response_basis": "RMS-normalized deterministic QR-16 seed 260905",
+    "curve_checkpoints": [10, 20, 30, 40]
+  },
+  "critic_updates": {
+    "updates_per_round_per_twin": 20,
+    "state_batch_size": 8,
+    "candidates_per_state": 48,
+    "maximum_online_candidates_per_state_batch": 24,
+    "online_focused_state_fraction": 0.5,
+    "learning_rate": 0.0001,
+    "weight_decay": 0.000001,
+    "ranking_weight": 0.35,
+    "ranking_temperature": 0.08
+  },
+  "actor_updates": {
+    "updates_per_round": 16,
+    "batch_size": 64,
+    "learning_rate_per_microstep": 0.00002,
+    "weight_decay": 0.000001,
+    "gradient_clip_norm": 1.0,
+    "selected_checkpoint_output_trust_weight": 10.0,
+    "cumulative_per_round_output_step_cap_sigma_rms": 0.02
+  },
+  "actor_cost_weight_gamma": 1.0,
+  "actor_cost_weight_maximum": 2048.0,
+  "cost_weights": {
+    "position": 5.0,
+    "yaw": 5.0,
+    "vx": 1.0,
+    "acceleration_rate": 0.05,
+    "steering_rate": 0.1
+  },
+  "checkpoint_selection": "lowest complete 120-row inner deterministic Query mean J over rounds 0--40; first minimum wins ties",
+  "primary_decision": "promote coarse-to-fine77 only when selected inner Actor mean is lower and warm-relative aggregate improvement is higher than paired recenter65 control",
+  "tail_metrics_role": "diagnostic only",
+  "actor_or_critic_trained": true,
+  "query_analytic_gradient_consumed": false,
+  "formal_validation_or_test_consumed": false,
+  "dbm_fields_or_labels_consumed": []
+}
