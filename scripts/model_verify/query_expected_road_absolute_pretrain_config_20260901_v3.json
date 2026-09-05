@@ -1,0 +1,52 @@
+{
+  "source_sidecar": "/disk/collect_data_from_anycar/mppi_rl_closed_loop/labels/query_expected_road_fullrank_expansion_20260901_v3",
+  "output_dir": "/home/plusai/anycar/outputs/query_mppi/query_expected_road_absolute_pretrain_expansion_20260901_v3",
+  "actor_architecture": "DirectNoAnchorGTXActor",
+  "actor_target": "absolute fullrank_teacher_knots",
+  "actor_inputs": [
+    "history",
+    "expected_road_reference_ego",
+    "observable_current_vx_yawrate_action"
+  ],
+  "actor_forbidden_inputs": [
+    "warm_or_anchor",
+    "first_pass_feedback",
+    "gradient_context",
+    "teacher_index_or_cost",
+    "dbm_field_or_label"
+  ],
+  "critic_architecture": "Twin ConfigurableAbsoluteActionValueCritic",
+  "critic_target": "standardized log1p frozen-Query direct J50 for all 132 candidates",
+  "folds": 5,
+  "seeds": [0, 1, 2],
+  "selection_fold_offset": 1,
+  "actor_epochs": 500,
+  "critic_epochs": 240,
+  "actor_selection_stride": 25,
+  "critic_selection_stride": 10,
+  "actor_batch_size": 32,
+  "critic_state_batch_size": 8,
+  "critic_candidates_per_state": 48,
+  "actor_learning_rate": 0.0003,
+  "critic_learning_rate": 0.0002,
+  "weight_decay": 0.000001,
+  "ranking_weight": 0.35,
+  "ranking_temperature": 0.08,
+  "output_support_std": 3.0,
+  "checkpoint_selection": {
+    "actor": "minimum mean frozen-Query direct J50 on the inner whole-episode fold",
+    "critic": "minimum value/ranking composite on the inner whole-episode fold",
+    "oof": "score only; never checkpoint or hyperparameter selection"
+  },
+  "initialization_gate": {
+    "actor_oof_teacher_recovery_median_minimum": 0.5,
+    "critic_oof_pearson_median_minimum": 0.5,
+    "critic_oof_warm_teacher_order_median_minimum": 0.8,
+    "critic_oof_bank_gain_recovery_median_minimum": 0.5
+  },
+  "direct_tail_gate": {
+    "all_run_warm_relative_p05_nonnegative": true,
+    "note": "tail failure blocks direct deployment but not guarded actor-visited OAC initialization"
+  },
+  "formal_validation_or_test_consumed": false
+}

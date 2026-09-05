@@ -1,0 +1,33 @@
+{
+  "action_bounds": {
+    "maximum": [1.0, 1.0],
+    "minimum": [-1.0, -1.0]
+  },
+  "bank_version": "query-t0-centered-fullrank-hadamard-132-v1",
+  "base_candidates": [
+    "warm",
+    "t0_teacher",
+    "best_saved",
+    "weighted_output"
+  ],
+  "cost_weights": {
+    "acceleration_rate": 0.05,
+    "position": 5.0,
+    "steering_rate": 0.1,
+    "vx": 1.0,
+    "yaw": 5.0,
+    "yawrate": 0.0
+  },
+  "direction_basis": "unnormalized-sylvester-hadamard-16",
+  "formal_validation_or_test_consumed": false,
+  "knot_indices": [0, 7, 14, 21, 28, 35, 42, 49],
+  "noise_sigma": [0.25, 0.35],
+  "num_directions": 16,
+  "num_knots": 8,
+  "output_dir": "/disk/collect_data_from_anycar/mppi_rl_closed_loop/labels/query_expected_road_fullrank_expansion_20260901_v3",
+  "parent_t0": "/disk/collect_data_from_anycar/mppi_rl_closed_loop/labels/query_expected_road_t0_expansion_20260901_v3",
+  "probe_radii_sigma": [0.03, 0.06, 0.1, 0.15],
+  "selection": "argmin direct frozen-Query cost over all 132 candidates; first index wins exact ties",
+  "teacher_anchor": "t0_teacher",
+  "total_candidates": 132
+}

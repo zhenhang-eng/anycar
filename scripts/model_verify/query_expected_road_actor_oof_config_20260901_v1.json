@@ -1,0 +1,55 @@
+{
+  "source_sidecar": "/disk/collect_data_from_anycar/mppi_rl_closed_loop/labels/query_expected_road_fullrank_20260901_v1",
+  "output_dir": "/home/plusai/anycar/outputs/query_mppi/query_expected_road_actor_oof_20260901_v1",
+  "architecture": "TorchMPPIProposalPolicy",
+  "actor_inputs": [
+    "history",
+    "expected_road_reference_ego",
+    "observable_current_vx_yawrate_action",
+    "exact_causal_mean_knots_before"
+  ],
+  "forbidden_actor_inputs": [
+    "t0_teacher",
+    "fullrank_teacher",
+    "teacher_index",
+    "candidate_cost",
+    "future_search_result",
+    "dbm_field_or_label"
+  ],
+  "noise_sigma": [
+    0.25,
+    0.35
+  ],
+  "maximum_delta_sigma": 2.0,
+  "folds": 5,
+  "seeds": [
+    0,
+    1,
+    2
+  ],
+  "inner_selection_fold_offset_by_seed": [
+    1,
+    2,
+    3
+  ],
+  "epochs": 300,
+  "selection_stride": 30,
+  "batch_size": 32,
+  "learning_rate": 0.0003,
+  "weight_decay": 0.0001,
+  "dropout": 0.05,
+  "loss": "mean squared error in per-channel sigma-normalized center coordinates against the 2-sigma-projected full-rank teacher",
+  "checkpoint_selection": "minimum mean frozen-Query direct J50 on the inner episode fold; first epoch wins exact ties",
+  "oof_use": "score only; never checkpoint or hyperparameter selection",
+  "primary_gate": {
+    "at_least_two_seeds_oof_fullrank_headroom_recovery": 0.5,
+    "all_seeds_oof_fullrank_headroom_recovery_strictly_positive": true,
+    "median_seed_episode_bootstrap_ci95_lower_strictly_positive": true
+  },
+  "tail_gate": {
+    "median_seed_warm_relative_gain_p05_minimum": 0.0,
+    "report_strict_worst_without_hiding_it": true,
+    "two_center_warm_guard_remains_mandatory": true
+  },
+  "formal_validation_or_test_consumed": false
+}

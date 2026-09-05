@@ -1,0 +1,52 @@
+{
+  "source_sidecar": "/disk/collect_data_from_anycar/mppi_rl_closed_loop/labels/query_expected_road_fullrank_expansion_20260901_v3",
+  "output_dir": "/disk/collect_data_from_anycar/mppi_rl_closed_loop/labels/query_noanchor_canonical_teacher_audit_20260901_v1",
+  "audit_version": "query-noanchor-current-action-hold-four-stage-257-v1",
+  "state_selection": {
+    "row_in_episode": 3,
+    "control_step": 325,
+    "expected_episode_count": 100,
+    "expected_rows_per_fold": 20
+  },
+  "canonical_initial_center": "repeat observable current_action over all 8 knots",
+  "forbidden_search_centers": [
+    "mean_knots_before_or_warm",
+    "t0_teacher",
+    "fullrank_teacher",
+    "best_saved_candidate",
+    "weighted_output"
+  ],
+  "direction_basis": "32 directions = unnormalized Sylvester Hadamard-16 plus RMS-normalized orthonormal DCT-II-16; evaluate antithetic signs",
+  "stage_radii_sigma": [1.5, 0.75, 0.35, 0.15],
+  "candidates_per_stage": 64,
+  "total_candidates_per_state": 257,
+  "noise_sigma": [0.25, 0.35],
+  "action_bounds": {
+    "minimum": [-1.0, -1.0],
+    "maximum": [1.0, 1.0]
+  },
+  "selection": "At each stage choose the first argmin over the retained incumbent followed by that stage's 64 candidates; only the resulting canonical incumbent seeds the next stage.",
+  "old_teacher_usage": "Stored warm/T0/fullrank centers and costs are comparison-only and can never enter canonical candidate construction or canonical argmin.",
+  "nearest_neighbor_contract": "Nested five-fold: outer query fold, (fold+1)%5 excluded for inner selection, remaining 60 episode-disjoint rows form the fit bank; fit-only robust normalization of strict observable blocks.",
+  "strict_observable_blocks": [
+    "history[250,7]",
+    "expected_road_reference_ego[51,4]",
+    "current_vx_yawrate_action[4]"
+  ],
+  "pre_registered_gates": {
+    "canonical_mean_cost_no_greater_than_warm": true,
+    "canonical_warm_regression_fraction_maximum": 0.2,
+    "canonical_nn_target_sigma_rms_median_maximum": 0.8,
+    "nn_target_distance_reduction_vs_old_fullrank_minimum": 0.15,
+    "canonical_input_target_spearman_median_minimum": 0.58,
+    "final_stage_share_of_total_search_gain_maximum": 0.1,
+    "nearest_neighbor_target_transfer_recovery_vs_hold_minimum": 0.25
+  },
+  "routing": {
+    "all_gates_pass": "Train the small nested-OOF strict no-anchor Actor audit before any full teacher generation.",
+    "search_quality_only_fails": "Revise only the canonical search budget/geometry; do not train Actor.",
+    "coherence_or_transfer_fails": "Reject this canonicalization and do not scale teacher generation."
+  },
+  "formal_validation_or_test_consumed": false,
+  "dbm_fields_or_labels_consumed": []
+}
