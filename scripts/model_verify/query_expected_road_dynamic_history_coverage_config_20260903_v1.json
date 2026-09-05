@@ -1,0 +1,41 @@
+{
+  "phase": "query-expected-road-dynamic-history-coverage-pilot-v1",
+  "output_dir": "/disk/collect_data_from_anycar/mppi_rl_closed_loop/query_expected_road_dynamic_history_coverage_20260903_v1",
+  "checkpoint": "/home/plusai/anycar/outputs/formal_real_finetune_query_baseline_split/20260728T143256/query_best.pt",
+  "seed_replay": "/home/plusai/anycar/outputs/query_mppi/real_query_train_distribution_replay_20260901_v1/replay.npz",
+  "source_collection": "/disk/collect_data_from_anycar/mppi_rl_closed_loop/query_expected_road_train_expansion_20260901_v3",
+  "source_diagnostic": "/home/plusai/anycar/outputs/query_mppi/query_oac_fixed_lr1e5_hard_slice_diagnostic_20260903_v1",
+  "disjoint_seed_collections": [
+    "/disk/collect_data_from_anycar/mppi_rl_closed_loop/query_expected_road_target_coverage_expansion_20260903_v1",
+    "/disk/collect_data_from_anycar/mppi_rl_closed_loop/query_expected_road_target_coverage_round2_20260903_v1"
+  ],
+  "collection_seed": 52961,
+  "burn_in_steps": 250,
+  "snapshots_per_episode": 6,
+  "snapshot_stride": 25,
+  "mppi_num_samples": 256,
+  "mppi_num_iterations": 2,
+  "mppi_sampling_mode": "gaussian",
+  "road_variation_fraction": 0.08,
+  "variation_slot_denominator": 5,
+  "target_cells": ["100:3"],
+  "fold_role": "dynamic-history pilot is fit-only and balanced over folds 2/3/4",
+  "coverage_design": "hold the snapshot road at the inner-adjacent 100:3 geometry while using six signed, smooth, burn-in-only lateral reference pulses to diversify causal histories",
+  "history_diversification_contract": {
+    "kind": "raised-sine lateral reference pulse",
+    "application": "procedural control reference only during burn-in steps [40,240); frozen Query plant and MPPI are unchanged",
+    "snapshot_reference": "unmodified target road from control step 250 onward",
+    "purpose": "retain nonstationary recovery dynamics inside the 250-token snapshot history instead of relying on seed/phase changes that wash out during burn-in"
+  },
+  "episodes": [
+    {"episode_id":"dynamic_history_100v3_00","episode_index":2963,"speed_kph":100,"variant_index":3,"repeat_index":1,"fold_id":2,"seed_row":547,"planned_start_fraction":0.890,"planned_variation_normalized":-0.5,"reference_prelude":{"begin_step":40,"end_step":240,"lateral_amplitude_m":-0.75}},
+    {"episode_id":"dynamic_history_100v3_01","episode_index":3087,"speed_kph":100,"variant_index":3,"repeat_index":1,"fold_id":3,"seed_row":557,"planned_start_fraction":0.902,"planned_variation_normalized":-0.5,"reference_prelude":{"begin_step":40,"end_step":240,"lateral_amplitude_m":-0.50}},
+    {"episode_id":"dynamic_history_100v3_02","episode_index":3211,"speed_kph":100,"variant_index":3,"repeat_index":1,"fold_id":4,"seed_row":581,"planned_start_fraction":0.914,"planned_variation_normalized":-0.5,"reference_prelude":{"begin_step":40,"end_step":240,"lateral_amplitude_m":-0.25}},
+    {"episode_id":"dynamic_history_100v3_03","episode_index":3335,"speed_kph":100,"variant_index":3,"repeat_index":1,"fold_id":2,"seed_row":590,"planned_start_fraction":0.926,"planned_variation_normalized":-0.5,"reference_prelude":{"begin_step":40,"end_step":240,"lateral_amplitude_m":0.25}},
+    {"episode_id":"dynamic_history_100v3_04","episode_index":3459,"speed_kph":100,"variant_index":3,"repeat_index":1,"fold_id":3,"seed_row":540,"planned_start_fraction":0.938,"planned_variation_normalized":-0.5,"reference_prelude":{"begin_step":40,"end_step":240,"lateral_amplitude_m":0.50}},
+    {"episode_id":"dynamic_history_100v3_05","episode_index":3583,"speed_kph":100,"variant_index":3,"repeat_index":1,"fold_id":4,"seed_row":575,"planned_start_fraction":0.950,"planned_variation_normalized":-0.5,"reference_prelude":{"begin_step":40,"end_step":240,"lateral_amplitude_m":0.75}}
+  ],
+  "formal_validation_or_test_consumed": false,
+  "dbm_fields_or_labels_consumed": [],
+  "query_analytic_gradient_consumed": false
+}

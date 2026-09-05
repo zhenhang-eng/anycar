@@ -1,0 +1,11 @@
+{
+  "base_absolute_replay": "/disk/collect_data_from_anycar/mppi_rl_closed_loop/labels/query_target_coverage_absolute_replay_20260903_v1",
+  "coverage_fullrank": "/disk/collect_data_from_anycar/mppi_rl_closed_loop/labels/query_expected_road_dynamic_history_fullrank_20260903_v1",
+  "output": "/disk/collect_data_from_anycar/mppi_rl_closed_loop/labels/query_dynamic_history_absolute_replay_20260903_v1",
+  "fit_folds": [2, 3, 4],
+  "inner_selection_fold": 1,
+  "outer_fold": 0,
+  "formal_validation_or_test_consumed": false,
+  "dbm_fields_or_labels_consumed": [],
+  "query_analytic_gradient_consumed": false
+}

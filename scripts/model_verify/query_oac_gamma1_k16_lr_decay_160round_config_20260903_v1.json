@@ -1,0 +1,138 @@
+{
+  "phase": "query-single-center-gamma1-k16-shared-prefix-lr-decay-160round-v1",
+  "sources": {
+    "absolute_replay": "/disk/collect_data_from_anycar/mppi_rl_closed_loop/labels/query_single_center_absolute_replay_20260902_v1",
+    "pretrain": "/home/plusai/anycar/outputs/query_mppi/query_single_center_actor_twin_critic_pretrain_20260902_v1",
+    "aggregation_ab": "/home/plusai/anycar/outputs/query_mppi/query_oac_aggregation_ab_20260902_v1",
+    "lr_scan_60round": "/home/plusai/anycar/outputs/query_mppi/query_oac_gamma1_k16_lr_scan_60round_20260903_v1",
+    "k16_160round": "/home/plusai/anycar/outputs/query_mppi/query_oac_gamma1_k16_160round_20260902_v1"
+  },
+  "output": "/home/plusai/anycar/outputs/query_mppi/query_oac_gamma1_k16_lr_decay_160round_20260903_v1",
+  "common_prefix": {
+    "rounds": 60,
+    "learning_rate_per_microstep": 0.00001,
+    "execution": "run exactly once per seed, then fork complete Actor/Critic/optimizer/Replay/NumPy/Torch RNG state"
+  },
+  "arms": [
+    {
+      "name": "fixed_lr1e5",
+      "actor_updates_per_round": 16,
+      "continuation_schedule": "fixed",
+      "continuation_learning_rate": 0.00001
+    },
+    {
+      "name": "cosine_lr1e5_to_2e6",
+      "actor_updates_per_round": 16,
+      "continuation_schedule": "cosine",
+      "decay_start_round": 61,
+      "decay_end_round": 120,
+      "decay_start_learning_rate": 0.00001,
+      "decay_end_learning_rate": 0.000002,
+      "post_decay_learning_rate": 0.000002
+    },
+    {
+      "name": "switch_lr2e6",
+      "actor_updates_per_round": 16,
+      "continuation_schedule": "fixed",
+      "continuation_learning_rate": 0.000002
+    }
+  ],
+  "actor_cost_weight_gamma": 1.0,
+  "actor_cost_weight_maximum": 2048.0,
+  "split_contract": {
+    "outer_fold": 0,
+    "inner_selection_fold": 1,
+    "fit_folds": [2, 3, 4],
+    "arm_selection_population": "inner-selection fold only; this is train-side LR schedule selection",
+    "outer_fold_usage": "already-consumed development OOF, evaluated only after selected/latest checkpoints are frozen and never used for LR schedule selection"
+  },
+  "pilot": {
+    "seeds": [0, 1, 2],
+    "rounds": 160,
+    "curve_checkpoints": [10, 20, 40, 60, 80, 100, 120, 140, 160],
+    "fit_contexts_visited_per_round": 20,
+    "candidates_per_visit": 39,
+    "noise_sigma": [0.25, 0.35],
+    "probe_radius_sigma_start": 0.2,
+    "probe_radius_sigma_end": 0.05,
+    "probe_radius_sigma_anneal_rounds": 90,
+    "probe_annealing_scope": "linearly from 0.20 to 0.05 over rounds 1--90, then fixed at 0.05 for rounds 91--160",
+    "response_fit_ridge": 0.1,
+    "response_gauss_newton_damping": 0.1,
+    "response_line_factors": [0.5, 1.0]
+  },
+  "critic_updates": {
+    "updates_per_round_per_twin": 20,
+    "learning_rate": 0.0001,
+    "weight_decay": 0.000001,
+    "state_batch_size": 8,
+    "candidates_per_state": 48,
+    "maximum_online_candidates_per_state_batch": 24,
+    "online_focused_state_fraction": 0.5,
+    "ranking_weight": 0.35,
+    "ranking_temperature": 0.08
+  },
+  "actor_updates": {
+    "learning_rate_per_microstep": 0.00001,
+    "weight_decay": 0.000001,
+    "batch_size": 64,
+    "selected_checkpoint_output_trust_weight": 10.0,
+    "gradient_clip_norm": 1.0,
+    "cumulative_per_round_output_step_cap_sigma_rms": 0.02,
+    "step_cap_semantics": "apply once after all K microsteps; cap only and never enlarge a naturally smaller cumulative round update"
+  },
+  "pairing": {
+    "deterministic_cuda_mode": "warn_only",
+    "shared_prefix_exact_by_construction": true,
+    "same_pretrain_checkpoint": true,
+    "same_context_schedule": true,
+    "same_response_basis_stream": true,
+    "same_critic_rng_state_at_fork": true,
+    "same_actor_batch_schedule": true,
+    "same_torch_cpu_cuda_rng_state_at_fork": true,
+    "same_k_gamma_trust_and_sampling": true,
+    "only_registered_difference_after_round_60": "Actor AdamW learning-rate schedule"
+  },
+  "checkpoint_selection": "lowest inner absolute Query mean cost over rounds 0--160; round zero eligible and first minimum wins ties",
+  "evaluation_contract": {
+    "primary": "deterministic direct center warm-relative gain G_w = J_warm - J_actor",
+    "primary_metrics": [
+      "P(J_actor <= J_warm)",
+      "gain median",
+      "gain P05",
+      "gain worst",
+      "sum(gain)/sum(J_warm)",
+      "speed and variant slices"
+    ],
+    "round0_relative_role": "learning-curve diagnostic only; never a policy qualification metric",
+    "warm_role": "external deterministic Query-evaluated center reference only; never an Actor input, label, weight, anchor, loss, or reward"
+  },
+  "decision_gate": {
+    "population": "inner selected checkpoints only; outer fold is corroborating consumed development evidence",
+    "candidate": "cosine_lr1e5_to_2e6",
+    "controls": ["fixed_lr1e5", "switch_lr2e6"],
+    "actor_mean_cost_advantage_seed_count_minimum": 2,
+    "pooled_mean_cost_not_worse_than_best_control_tolerance": 0.05,
+    "pooled_aggregate_improvement_not_worse_than_best_control_tolerance": 0.005,
+    "pooled_median_not_worse_than_best_control_tolerance": 0.05,
+    "pooled_p05_not_worse_than_best_control_tolerance": 0.25,
+    "pooled_worst_not_worse_than_best_control_tolerance": 1.0,
+    "latest_to_selected_mean_cost_gap_maximum": 0.25,
+    "hard_slices": ["70:0", "55:2", "100:2"],
+    "hard_slice_aggregate_not_worse_than_fixed_lr1e5_tolerance": 0.05,
+    "hard_slice_p05_not_worse_than_fixed_lr1e5_tolerance": 0.25,
+    "hard_slice_worst_not_worse_than_fixed_lr1e5_tolerance": 1.0,
+    "pass": "promote high-initial-LR with cosine decay as the Query OAC schedule for the next train-side phase",
+    "fail": "do not promote the decay schedule; diagnose whether fixed high LR or the hard strata dominate"
+  },
+  "cost_weights": {
+    "position": 5.0,
+    "yaw": 5.0,
+    "vx": 1.0,
+    "acceleration_rate": 0.05,
+    "steering_rate": 0.1
+  },
+  "formal_validation_or_test_consumed": false,
+  "dbm_fields_or_labels_consumed": [],
+  "query_analytic_gradient_consumed": false
+}

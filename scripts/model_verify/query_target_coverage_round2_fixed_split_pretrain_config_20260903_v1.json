@@ -1,0 +1,44 @@
+{
+  "phase": "target-coverage-adaptive-round2-fixed-split-noanchor-pretrain-v1",
+  "outputs": {
+    "absolute_replay": "/disk/collect_data_from_anycar/mppi_rl_closed_loop/labels/query_target_coverage_round2_absolute_replay_20260903_v1",
+    "pretrain": "/home/plusai/anycar/outputs/query_mppi/query_target_coverage_round2_fixed_split_pretrain_20260903_v1"
+  },
+  "split_contract": {
+    "fit_folds": [2, 3, 4],
+    "inner_selection_fold": 1,
+    "outer_fold": 0,
+    "outer_fold_evaluated": false
+  },
+  "actor": {
+    "architecture": "DirectNoAnchorGTXActor",
+    "coarse_initialization": {
+      "epochs": 50,
+      "selection_stride": 10,
+      "target": "observable-current-action landscape branch where present, otherwise fullrank absolute teacher"
+    }
+  },
+  "critic": {
+    "architecture": "ConfigurableAbsoluteActionValueCritic",
+    "epochs": 240,
+    "selection_stride": 10,
+    "state_batch_size": 8,
+    "candidates_per_state": 48,
+    "learning_rate": 0.0002,
+    "weight_decay": 0.000001,
+    "ranking_weight": 0.35,
+    "ranking_temperature": 0.08,
+    "seeds": [0, 1, 2],
+    "pairwise_delta_head_enabled": false,
+    "analytic_query_or_dbm_gradient_target": false
+  },
+  "critic_inner_gates": {
+    "log_cost_pearson_median_minimum": 0.7,
+    "same_state_pair_sign_accuracy_median_minimum": 0.75,
+    "landscape_bank_gain_recovery_minimum": 0.5,
+    "minimum_seeds_passing_all_gates": 2
+  },
+  "formal_validation_or_test_consumed": false,
+  "dbm_fields_or_labels_consumed": [],
+  "query_analytic_gradient_consumed": false
+}

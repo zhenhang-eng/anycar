@@ -1,0 +1,50 @@
+{
+  "phase": "query-oac-fixed-lr1e5-hard-slice-diagnostic-v1",
+  "sources": {
+    "lr_decay_160round": "/home/plusai/anycar/outputs/query_mppi/query_oac_gamma1_k16_lr_decay_160round_20260903_v1",
+    "absolute_replay": "/disk/collect_data_from_anycar/mppi_rl_closed_loop/labels/query_single_center_absolute_replay_20260902_v1"
+  },
+  "output": "/home/plusai/anycar/outputs/query_mppi/query_oac_fixed_lr1e5_hard_slice_diagnostic_20260903_v1",
+  "source_arm": "fixed_lr1e5",
+  "seeds": [0, 1, 2],
+  "split_contract": {
+    "fit_folds": [2, 3, 4],
+    "inner_selection_fold": 1,
+    "outer_fold": 0,
+    "diagnostic_population": "fit plus already-consumed inner-selection only",
+    "outer_fold_usage": "not evaluated by this diagnostic"
+  },
+  "target_slice": "55:2",
+  "control_slices": ["70:0", "100:2", "55:1", "55:3", "100:3"],
+  "fresh_local_response": {
+    "population": "inner-selection target/control rows only",
+    "centers": ["actor", "warm"],
+    "one_sided_radii_sigma": [0.025, 0.05, 0.1],
+    "basis_index": 0,
+    "candidates_per_bank": 39,
+    "finite_difference_ridge": 0.000001
+  },
+  "pilot": {
+    "response_fit_ridge": 0.1,
+    "response_gauss_newton_damping": 0.1,
+    "response_line_factors": [0.5, 1.0]
+  },
+  "actor_gradient": {
+    "population": "fit only",
+    "gamma": 1.0,
+    "weight_maximum": 2048.0,
+    "batch_size": 64,
+    "comparison": "target versus complement and all speed-variant strata at the selected Actor/Twin-Critic checkpoint"
+  },
+  "noise_sigma": [0.25, 0.35],
+  "cost_weights": {
+    "position": 5.0,
+    "yaw": 5.0,
+    "vx": 1.0,
+    "acceleration_rate": 0.05,
+    "steering_rate": 0.1
+  },
+  "formal_validation_or_test_consumed": false,
+  "dbm_fields_or_labels_consumed": [],
+  "query_analytic_gradient_consumed": false
+}
